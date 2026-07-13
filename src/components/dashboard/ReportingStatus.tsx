@@ -1,0 +1,76 @@
+import type { FundOSData } from "@/lib/types";
+import { allFundMetrics, formatDate, formatMoney } from "@/lib/calc";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { Badge } from "@/components/ui/Badge";
+import { FileDown, FileSpreadsheet, Mail } from "lucide-react";
+
+export function ReportingStatus({ data }: { data: FundOSData }) {
+  const funds = allFundMetrics(data);
+  const approvedMarks = data.valuationMarks.filter(
+    (m) => m.approval_status === "approved"
+  ).length;
+  const pendingMarks = data.valuationMarks.length - approvedMarks;
+
+  const lastNavByFund = funds.map((f) => {
+    const dates = data.positionSnapshots
+      .filter((s) =>
+        data.investmentLots.some(
+          (l) => l.id === s.lot_id && l.fund_id === f.fund.id
+        )
+      )
+      .map((s) => s.snapshot_date)
+      .sort();
+    return { fund: f, lastNav: dates[dates.length - 1] ?? null };
+  });
+
+  return (
+    <Panel className="h-full">
+      <PanelHeader
+        title="Reporting Status"
+        subtitle="NAV readiness & exports"
+        action={
+          <Badge tone={pendingMarks ? "warn" : "gain"}>
+            {pendingMarks ? `${pendingMarks} pending` : "All approved"}
+          </Badge>
+        }
+      />
+      <div className="grid grid-cols-2 gap-px bg-line">
+        {lastNavByFund.map(({ fund, lastNav }) => (
+          <div key={fund.fund.id} className="bg-surface p-4">
+            <div className="text-2xs font-medium uppercase tracking-wide text-ink-faint">
+              {fund.fund.code} — Latest NAV
+            </div>
+            <div className="mt-1 tnum text-lg font-semibold text-ink">
+              {formatMoney(fund.currentNav, fund.currency, { compact: true })}
+            </div>
+            <div className="mt-0.5 text-2xs text-ink-muted">
+              As of {formatDate(lastNav, "medium")}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-line px-4 py-3">
+        <div className="text-2xs text-ink-muted">
+          <span className="tnum font-semibold text-ink">{approvedMarks}</span> marks
+          approved · <span className="tnum font-semibold text-ink">{pendingMarks}</span> pending
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 border-t border-line p-3">
+        <ExportButton icon={<FileDown className="h-3.5 w-3.5" />} label="PDF" />
+        <ExportButton icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Excel" />
+        <ExportButton icon={<Mail className="h-3.5 w-3.5" />} label="LP Update" />
+      </div>
+    </Panel>
+  );
+}
+
+function ExportButton({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <button className="flex items-center justify-center gap-1.5 rounded border border-line bg-surface px-2 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:border-line-strong hover:text-ink">
+      {icon}
+      {label}
+    </button>
+  );
+}

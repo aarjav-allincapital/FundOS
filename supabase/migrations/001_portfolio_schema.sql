@@ -40,8 +40,8 @@ CREATE TYPE valuation_type AS ENUM (
 
 CREATE TYPE deal_stage AS ENUM (
   'sourcing',
-  'early_evaluation',
-  'deep_dive',
+  'first_call',
+  'second_call',
   'investment_committee',
   'closing',
   'post_investment',
