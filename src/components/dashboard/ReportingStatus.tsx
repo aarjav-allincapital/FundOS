@@ -1,5 +1,11 @@
 import type { FundOSData } from "@/lib/types";
-import { allFundMetrics, formatDate, formatMoney } from "@/lib/calc";
+import {
+  allFundMetrics,
+  fundIrr,
+  formatDate,
+  formatMoney,
+  formatPercent,
+} from "@/lib/calc";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
 import { FileDown, FileSpreadsheet, Mail } from "lucide-react";
@@ -35,19 +41,26 @@ export function ReportingStatus({ data }: { data: FundOSData }) {
         }
       />
       <div className="grid grid-cols-2 gap-px bg-line">
-        {lastNavByFund.map(({ fund, lastNav }) => (
-          <div key={fund.fund.id} className="bg-surface p-4">
-            <div className="text-2xs font-medium uppercase tracking-wide text-ink-faint">
-              {fund.fund.code} — Latest NAV
+        {lastNavByFund.map(({ fund, lastNav }) => {
+          const { grossIrr, netIrr } = fundIrr(data, fund.fund);
+          return (
+            <div key={fund.fund.id} className="bg-surface p-4">
+              <div className="text-2xs font-medium uppercase tracking-wide text-ink-faint">
+                {fund.fund.code} — Latest NAV
+              </div>
+              <div className="mt-1 tnum text-lg font-semibold text-ink">
+                {formatMoney(fund.currentNav, fund.currency, { compact: true })}
+              </div>
+              <div className="mt-0.5 text-2xs text-ink-muted">
+                As of {formatDate(lastNav, "medium")}
+              </div>
+              <div className="mt-2 flex gap-4 border-t border-line pt-2">
+                <IrrStat label="Gross IRR" value={formatPercent(grossIrr, { fraction: true })} />
+                <IrrStat label="Net IRR" value={formatPercent(netIrr, { fraction: true })} />
+              </div>
             </div>
-            <div className="mt-1 tnum text-lg font-semibold text-ink">
-              {formatMoney(fund.currentNav, fund.currency, { compact: true })}
-            </div>
-            <div className="mt-0.5 text-2xs text-ink-muted">
-              As of {formatDate(lastNav, "medium")}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex items-center justify-between border-t border-line px-4 py-3">
@@ -63,6 +76,15 @@ export function ReportingStatus({ data }: { data: FundOSData }) {
         <ExportButton icon={<Mail className="h-3.5 w-3.5" />} label="LP Update" />
       </div>
     </Panel>
+  );
+}
+
+function IrrStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="tnum text-sm font-semibold text-ink">{value}</span>
+      <span className="text-2xs text-ink-faint">{label}</span>
+    </div>
   );
 }
 

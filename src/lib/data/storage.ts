@@ -31,6 +31,22 @@ function migrateDealStages(data: FundOSData): FundOSData {
   return { ...data, deals, dealStageHistory };
 }
 
+/**
+ * Backfill paid_in_capital_fund on lots persisted before it existed. Best-effort:
+ * uses current cash_invested_fund, which for a lot already partially exited is
+ * the reduced basis (the original is unrecoverable) — new lots record it correctly.
+ */
+function migratePaidInCapital(data: FundOSData): FundOSData {
+  let changed = false;
+  const investmentLots = data.investmentLots.map((lot) => {
+    if (lot.paid_in_capital_fund != null) return lot;
+    changed = true;
+    return { ...lot, paid_in_capital_fund: lot.cash_invested_fund };
+  });
+  if (!changed) return data;
+  return { ...data, investmentLots };
+}
+
 const BOOTSTRAP_FX_IDS = new Set(["fx-inr-usd", "fx-usd-inr"]);
 
 function stripBootstrapFx(data: FundOSData): FundOSData {
@@ -49,6 +65,7 @@ export function loadFundOSData(): FundOSData {
       return bootstrap;
     }
     let data = migrateDealStages(JSON.parse(raw) as FundOSData);
+    data = migratePaidInCapital(data);
     data = stripBootstrapFx(data);
     saveFundOSData(data);
     return data;

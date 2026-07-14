@@ -79,6 +79,12 @@ export interface Fund {
   currency: CurrencyCode;
   vintage_year: number | null;
   status: string;
+  /** Fund economics (optional) — drive Net IRR. See lib/calc/irr.ts. */
+  committed_capital_fund?: number | null;
+  mgmt_fee_pct?: number | null; // e.g. 0.02
+  mgmt_fee_basis?: "committed" | "deployed" | null;
+  carry_pct?: number | null; // e.g. 0.20
+  hurdle_pct?: number | null; // e.g. 0.08 (simple annual preferred return)
   created_at: string;
 }
 
@@ -207,7 +213,15 @@ export interface InvestmentLot {
   price_per_share_local: number;
   currency: CurrencyCode;
   cash_invested_local: number;
+  /** Remaining cost basis (fund ccy) of shares still held; reduced on partial exit. */
   cash_invested_fund: number;
+  /**
+   * Total capital ever paid into this lot (fund ccy), immutable after entry.
+   * This — not cash_invested_fund — is the DPI/TVPI/IRR denominator, so a
+   * partial exit never shrinks committed/deployed capital. Optional for
+   * backward compatibility; consumers fall back to cash_invested_fund.
+   */
+  paid_in_capital_fund?: number;
   fx_rate_at_entry: number;
   ownership_at_entry_pct: number | null;
   rights_and_terms: Record<string, unknown> | null;

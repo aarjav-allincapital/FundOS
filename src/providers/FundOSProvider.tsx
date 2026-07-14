@@ -30,6 +30,7 @@ import {
 import {
   updateCompany as patchCompany,
   updateDeal as patchDeal,
+  updateFund as patchFund,
   updateFounder as patchFounder,
   updateFxRate as patchFxRate,
   updateInvestmentLot as patchLot,
@@ -38,6 +39,7 @@ import {
   type UpdateCompanyInput,
   type UpdateDealInput,
   type UpdateFounderInput,
+  type UpdateFundInput,
   type UpdateFxRateInput,
   type UpdateLotInput,
   type UpdateSnapshotInput,
@@ -60,6 +62,7 @@ interface FundOSContextValue {
   exitLot: (input: ExitLotInput) => Promise<void>;
   updateCompany: (input: UpdateCompanyInput) => void;
   updateFounder: (input: UpdateFounderInput) => void;
+  updateFund: (input: UpdateFundInput) => void;
   updateLot: (input: UpdateLotInput) => void;
   updateValuationMark: (input: UpdateValuationMarkInput) => void;
   updateSnapshot: (input: UpdateSnapshotInput) => void;
@@ -191,6 +194,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       },
       updateCompany: (input) => commit((prev) => patchCompany(prev, input)),
       updateFounder: (input) => commit((prev) => patchFounder(prev, input)),
+      updateFund: (input) => commit((prev) => patchFund(prev, input)),
       updateLot: (input) => commit((prev) => patchLot(prev, input)),
       updateValuationMark: (input) =>
         commit((prev) => patchValuationMark(prev, input)),
