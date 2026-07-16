@@ -20,6 +20,9 @@ export interface LotPosition {
   round: Round | null;
   latest: PositionSnapshot | null;
   previous: PositionSnapshot | null;
+  /** Total capital paid into this lot (fund ccy); never shrinks on partial exit. */
+  paidInFund: number;
+  /** Remaining cost basis (fund ccy) of shares still held. */
   costBasisFund: number;
   fmvFund: number;
   unrealizedFund: number;
@@ -38,18 +41,24 @@ export function snapshotsForLot(
     .sort((a, b) => (a.snapshot_date < b.snapshot_date ? 1 : -1));
 }
 
-/** Build the current position for a single lot (mirrors v_lot_current). */
+/**
+ * Build the current position for a single lot (mirrors v_lot_current).
+ * Returns null when the lot references a fund/company that no longer exists,
+ * so one orphaned row can't crash the whole portfolio derivation.
+ */
 export function buildLotPosition(
   data: FundOSData,
   lot: InvestmentLot
-): LotPosition {
-  const fund = data.funds.find((f) => f.id === lot.fund_id)!;
-  const company = data.companies.find((c) => c.id === lot.company_id)!;
+): LotPosition | null {
+  const fund = data.funds.find((f) => f.id === lot.fund_id);
+  const company = data.companies.find((c) => c.id === lot.company_id);
+  if (!fund || !company) return null;
   const round = data.rounds.find((r) => r.id === lot.round_id) ?? null;
   const snaps = snapshotsForLot(data, lot.id);
   const latest = snaps[0] ?? null;
   const previous = snaps[1] ?? null;
 
+  const paidInFund = lot.paid_in_capital_fund ?? lot.cash_invested_fund;
   const costBasisFund = latest?.cost_basis_fund ?? lot.cash_invested_fund;
   const fmvFund = latest?.fmv_fund ?? lot.cash_invested_fund;
   const unrealizedFund = latest?.unrealized_gain_loss_fund ?? 0;
@@ -67,6 +76,7 @@ export function buildLotPosition(
     round,
     latest,
     previous,
+    paidInFund,
     costBasisFund,
     fmvFund,
     unrealizedFund,
@@ -76,7 +86,9 @@ export function buildLotPosition(
 }
 
 export function allLotPositions(data: FundOSData): LotPosition[] {
-  return data.investmentLots.map((lot) => buildLotPosition(data, lot));
+  return data.investmentLots
+    .map((lot) => buildLotPosition(data, lot))
+    .filter((p): p is LotPosition => p !== null);
 }
 
 export interface CompanyRollup {
@@ -156,10 +168,11 @@ export function recentValuationMarks(
   limit = 8
 ): Array<ValuationMark & { company: Company }> {
   return data.valuationMarks
-    .map((m) => ({
-      ...m,
-      company: data.companies.find((c) => c.id === m.company_id)!,
-    }))
+    .map((m) => {
+      const company = data.companies.find((c) => c.id === m.company_id);
+      return company ? { ...m, company } : null;
+    })
+    .filter((m): m is ValuationMark & { company: Company } => m !== null)
     .sort((a, b) => (a.valuation_date < b.valuation_date ? 1 : -1))
     .slice(0, limit);
 }

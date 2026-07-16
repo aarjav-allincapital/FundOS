@@ -21,6 +21,7 @@ import type { UpdateLotInput } from "@/lib/data/updates";
 export type EditRecordMode =
   | "company"
   | "founder"
+  | "fund"
   | "lot"
   | "valuation"
   | "snapshot"
@@ -30,6 +31,7 @@ export type EditRecordMode =
 const TITLES: Record<EditRecordMode, string> = {
   company: "Edit Company",
   founder: "Edit Founder",
+  fund: "Edit Fund & Economics",
   lot: "Edit Investment Lot",
   valuation: "Edit Valuation Mark",
   snapshot: "Edit Snapshot",
@@ -481,6 +483,126 @@ export function EditRecordModal({
                 <Field label="Date *">
                   <DateInput name="date" required defaultValue={fx.rate_date} />
                 </Field>
+                <Submit label="Save Changes" saving={saving} />
+              </form>
+            );
+          })()}
+
+          {mode === "fund" && (() => {
+            const fund = data.funds.find((x) => x.id === recordId);
+            if (!fund) return <Missing />;
+            // Economics are stored as decimals (0.02); the form shows percents (2).
+            const asPct = (v: number | null | undefined) =>
+              v == null ? "" : String(Math.round(v * 10000) / 100);
+            return (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.currentTarget);
+                  const num = (k: string) => {
+                    const s = String(fd.get(k) ?? "").trim();
+                    return s === "" ? null : Number(s);
+                  };
+                  const fromPct = (k: string) => {
+                    const n = num(k);
+                    return n == null ? null : n / 100;
+                  };
+                  save(() =>
+                    ctx.updateFund({
+                      id: fund.id,
+                      name: String(fd.get("name")),
+                      vintage_year: num("vintage"),
+                      committed_capital_fund: num("committed"),
+                      mgmt_fee_pct: fromPct("mgmt_fee"),
+                      mgmt_fee_basis: String(fd.get("fee_basis")) as
+                        | "committed"
+                        | "deployed",
+                      carry_pct: fromPct("carry"),
+                      hurdle_pct: fromPct("hurdle"),
+                    })
+                  );
+                }}
+              >
+                <Field label="Fund Name *">
+                  <input name="name" required defaultValue={fund.name} className={inputClass} />
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Vintage Year">
+                    <input
+                      name="vintage"
+                      type="number"
+                      defaultValue={fund.vintage_year ?? ""}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Reporting Currency">
+                    <input
+                      readOnly
+                      value={fund.currency}
+                      className={`${inputClass} bg-surface-subtle text-ink-muted`}
+                    />
+                  </Field>
+                </div>
+
+                <div className="mb-2 mt-1 border-t border-line pt-2 text-2xs font-medium uppercase tracking-wide text-ink-faint">
+                  Economics — drive Net IRR
+                </div>
+                <Field label={`Committed Capital (${fund.currency})`}>
+                  <input
+                    name="committed"
+                    type="number"
+                    step="any"
+                    defaultValue={fund.committed_capital_fund ?? ""}
+                    className={inputClass}
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Mgmt Fee % / yr">
+                    <input
+                      name="mgmt_fee"
+                      type="number"
+                      step="any"
+                      defaultValue={asPct(fund.mgmt_fee_pct)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Fee Basis">
+                    <select
+                      name="fee_basis"
+                      defaultValue={fund.mgmt_fee_basis ?? "deployed"}
+                      className={inputClass}
+                    >
+                      <option value="deployed">Deployed capital</option>
+                      <option value="committed">Committed capital</option>
+                    </select>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Carried Interest %">
+                    <input
+                      name="carry"
+                      type="number"
+                      step="any"
+                      defaultValue={asPct(fund.carry_pct)}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label="Preferred / Hurdle % / yr">
+                    <input
+                      name="hurdle"
+                      type="number"
+                      step="any"
+                      defaultValue={asPct(fund.hurdle_pct)}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+                <p className="mb-2 text-2xs text-ink-faint">
+                  Fee basis &ldquo;Committed&rdquo; charges on committed capital;
+                  &ldquo;Deployed&rdquo; on paid-in. Carry applies to profit above
+                  return of capital plus the hurdle. Net IRR is a modeled
+                  approximation, not booked fees.
+                </p>
                 <Submit label="Save Changes" saving={saving} />
               </form>
             );

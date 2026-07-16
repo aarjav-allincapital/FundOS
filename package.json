@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "sim": "tsx scripts/sim.ts && tsx scripts/sim2.ts && tsx scripts/sim3.ts"
+    "sim": "tsx scripts/sim.ts && tsx scripts/sim2.ts && tsx scripts/sim3.ts && tsx scripts/sim4.ts && tsx scripts/sim5.ts && tsx scripts/sim6.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

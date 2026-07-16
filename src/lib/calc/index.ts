@@ -12,6 +12,7 @@ export * from "@/lib/calc/portfolio";
 export * from "@/lib/calc/fund";
 export * from "@/lib/calc/pipeline";
 export * from "@/lib/calc/trends";
+export * from "@/lib/calc/irr";
 
 import type { CurrencyCode, FundOSData, FxRatePurpose } from "@/lib/types";
 import { allFundMetrics, type FundMetrics } from "@/lib/calc/fund";

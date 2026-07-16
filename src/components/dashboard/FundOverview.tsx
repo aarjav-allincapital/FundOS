@@ -3,14 +3,17 @@
 import type { FundOSData } from "@/lib/types";
 import {
   allFundMetrics,
+  fundIrr,
   fundNavTrend,
   formatMoney,
   formatMultiple,
+  formatPercent,
 } from "@/lib/calc";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
 import { Delta } from "@/components/ui/Delta";
 import { TrendLine } from "@/components/charts/TrendLine";
+import { EditButton } from "@/components/forms/EditButton";
 
 export function FundOverview({ data }: { data: FundOSData }) {
   const metrics = allFundMetrics(data);
@@ -19,6 +22,7 @@ export function FundOverview({ data }: { data: FundOSData }) {
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {metrics.map((m) => {
         const trend = fundNavTrend(data, m.fund);
+        const { grossIrr, netIrr } = fundIrr(data, m.fund);
         const ccy = m.currency;
         const navGainPct =
           m.deployedCost > 0
@@ -30,9 +34,12 @@ export function FundOverview({ data }: { data: FundOSData }) {
               title={`${m.fund.name} · ${m.fund.code}`}
               subtitle={`Vintage ${m.fund.vintage_year ?? "—"} · ${ccy} · ${m.companyCount} companies`}
               action={
-                <Badge tone="gain" dot>
-                  {m.fund.status}
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  <Badge tone="gain" dot>
+                    {m.fund.status}
+                  </Badge>
+                  <EditButton mode="fund" recordId={m.fund.id} label="Edit fund & economics" />
+                </div>
               }
             />
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 pt-4">
@@ -73,6 +80,16 @@ export function FundOverview({ data }: { data: FundOSData }) {
               <Stat label="Gross MOIC" value={formatMultiple(m.grossMoic)} />
               <Stat label="Unreal. MOIC" value={formatMultiple(m.unrealizedMoic)} />
               <Stat label="DPI" value={formatMultiple(m.dpi)} />
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-line border-t border-line">
+              <Stat
+                label="Gross IRR"
+                value={formatPercent(grossIrr, { fraction: true })}
+              />
+              <Stat
+                label="Net IRR"
+                value={formatPercent(netIrr, { fraction: true })}
+              />
             </div>
           </Panel>
         );

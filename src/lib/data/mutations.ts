@@ -245,6 +245,7 @@ export function addInvestmentLot(data: FundOSData, input: AddLotInput): FundOSDa
     currency: input.currency,
     cash_invested_local: cashLocal,
     cash_invested_fund: cashFund,
+    paid_in_capital_fund: cashFund,
     fx_rate_at_entry: fx,
     ownership_at_entry_pct: input.ownership_at_entry_pct ?? null,
     rights_and_terms: null,
@@ -313,8 +314,12 @@ export function addValuationMark(
     created_at: new Date().toISOString(),
   };
 
+  // Partially-exited lots still hold a live position, so they must be repriced
+  // by new company marks too — otherwise their NAV freezes at the exit-date mark.
   const activeLots = data.investmentLots.filter(
-    (l) => l.company_id === input.company_id && l.status === "active"
+    (l) =>
+      l.company_id === input.company_id &&
+      (l.status === "active" || l.status === "partial_exit")
   );
 
   const newSnaps: PositionSnapshot[] = [];

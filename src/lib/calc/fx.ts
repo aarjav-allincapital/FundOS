@@ -135,7 +135,11 @@ export function resolveFxRate(
     };
   }
 
-  return { rate: 1, rate_date: null, isIdentity: false, missing: true };
+  // No rate exists in either direction. Never fabricate a 1.0 for a
+  // cross-currency pair — that silently misstates totals by the entire FX
+  // magnitude (~83x for INR/USD). Return NaN so the figure surfaces as "—"
+  // wherever it renders, instead of a plausible-but-wrong number.
+  return { rate: NaN, rate_date: null, isIdentity: false, missing: true };
 }
 
 export function convert(

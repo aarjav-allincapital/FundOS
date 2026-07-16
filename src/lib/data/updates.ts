@@ -436,3 +436,49 @@ function replaceManualFxRate(
     input.rate_date
   );
 }
+
+// ------------------------------------------------------------------
+// Fund (metadata + economics that drive Net IRR)
+// ------------------------------------------------------------------
+
+export interface UpdateFundInput {
+  id: string;
+  name?: string;
+  vintage_year?: number | null;
+  status?: string;
+  committed_capital_fund?: number | null;
+  mgmt_fee_pct?: number | null;
+  mgmt_fee_basis?: "committed" | "deployed" | null;
+  carry_pct?: number | null;
+  hurdle_pct?: number | null;
+}
+
+export function updateFund(data: FundOSData, input: UpdateFundInput): FundOSData {
+  return {
+    ...data,
+    funds: data.funds.map((f) =>
+      f.id === input.id
+        ? {
+            ...f,
+            name: input.name ?? f.name,
+            vintage_year:
+              input.vintage_year !== undefined ? input.vintage_year : f.vintage_year,
+            status: input.status ?? f.status,
+            committed_capital_fund:
+              input.committed_capital_fund !== undefined
+                ? input.committed_capital_fund
+                : f.committed_capital_fund,
+            mgmt_fee_pct:
+              input.mgmt_fee_pct !== undefined ? input.mgmt_fee_pct : f.mgmt_fee_pct,
+            mgmt_fee_basis:
+              input.mgmt_fee_basis !== undefined
+                ? input.mgmt_fee_basis
+                : f.mgmt_fee_basis,
+            carry_pct: input.carry_pct !== undefined ? input.carry_pct : f.carry_pct,
+            hurdle_pct:
+              input.hurdle_pct !== undefined ? input.hurdle_pct : f.hurdle_pct,
+          }
+        : f
+    ),
+  };
+}

@@ -38,7 +38,9 @@ export function fundMetrics(data: FundOSData, fund: Fund): FundMetrics {
     (p) => p.lot.status === "active" || p.lot.status === "partial_exit"
   );
 
-  const deployedCost = sum(positions.map((p) => p.costBasisFund));
+  // Deployed = total capital paid in (immutable), NOT remaining basis — so a
+  // partial exit never shrinks the DPI/TVPI/MOIC denominator.
+  const deployedCost = sum(positions.map((p) => p.paidInFund));
   const currentNav = sum(active.map((p) => p.fmvFund));
 
   const realizedProceeds = data.realizations
