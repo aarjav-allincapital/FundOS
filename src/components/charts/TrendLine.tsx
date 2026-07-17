@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { formatDate } from "@/lib/calc";
 
 export interface TrendPoint {
   label: string;
@@ -42,21 +43,18 @@ export function TrendLine({
             <stop offset="100%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
-        {showAxis && (
-          <XAxis
-            dataKey="label"
-            tick={{ fontSize: 10, fill: "#8A8A8A", fontFamily: JAKARTA }}
-            axisLine={false}
-            tickLine={false}
-            interval="preserveStartEnd"
-          />
-        )}
-        {showAxis && (
-          <YAxis
-            hide
-            domain={["dataMin", "dataMax"]}
-          />
-        )}
+        {/* Always bind the X axis to the date label so the tooltip shows the
+            date (not the array index); hide it visually unless showAxis. */}
+        <XAxis
+          dataKey="label"
+          hide={!showAxis}
+          tick={{ fontSize: 10, fill: "#8A8A8A", fontFamily: JAKARTA }}
+          axisLine={false}
+          tickLine={false}
+          interval="preserveStartEnd"
+          tickFormatter={(v: string) => formatDate(v, "short")}
+        />
+        <YAxis hide domain={["dataMin", "dataMax"]} />
         <Tooltip
           cursor={{ stroke: "#D4D4D4", strokeWidth: 1 }}
           contentStyle={{
@@ -68,6 +66,7 @@ export function TrendLine({
             boxShadow: "0 8px 24px -6px rgba(10,10,10,0.12)",
           }}
           labelStyle={{ color: "#8A8A8A", fontSize: 10, marginBottom: 2, fontFamily: JAKARTA }}
+          labelFormatter={(label: string) => formatDate(label, "medium")}
           formatter={(v: number) => [
             valueFormatter ? valueFormatter(v) : v.toLocaleString(),
             "",

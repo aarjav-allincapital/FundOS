@@ -15,43 +15,28 @@ export function ValueMovers({ data }: { data: FundOSData }) {
     .filter((x) => x.pct > 0)
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 5);
-  const losers = [...positions]
-    .filter((x) => x.pct < 0)
-    .sort((a, b) => a.pct - b.pct)
-    .slice(0, 5);
 
-  const maxAbs = Math.max(
-    1,
-    ...positions.map((x) => Math.abs(x.pct))
-  );
+  const maxAbs = Math.max(1, ...gainers.map((x) => Math.abs(x.pct)));
 
   return (
     <Panel className="h-full">
-      <PanelHeader title="Value Movers" subtitle="Unrealized change vs cost basis" />
-      <div className="grid grid-cols-1 divide-y divide-line md:grid-cols-2 md:divide-x md:divide-y-0">
-        <MoverList title="Top Gainers" rows={gainers} maxAbs={maxAbs} tone="gain" />
-        <MoverList title="Top Detractors" rows={losers} maxAbs={maxAbs} tone="loss" />
-      </div>
+      <PanelHeader title="Top Gainers" subtitle="Unrealized change vs cost basis" />
+      <MoverList rows={gainers} maxAbs={maxAbs} tone="gain" />
     </Panel>
   );
 }
 
 function MoverList({
-  title,
   rows,
   maxAbs,
   tone,
 }: {
-  title: string;
   rows: Array<{ p: LotPosition; pct: number }>;
   maxAbs: number;
   tone: "gain" | "loss";
 }) {
   return (
     <div className="p-4">
-      <div className="mb-2 text-2xs font-semibold uppercase tracking-wide text-ink-faint">
-        {title}
-      </div>
       <div className="flex flex-col gap-2">
         {rows.length === 0 && (
           <span className="text-2xs text-ink-faint">No positions.</span>

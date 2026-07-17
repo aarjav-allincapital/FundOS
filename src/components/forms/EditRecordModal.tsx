@@ -519,6 +519,8 @@ export function EditRecordModal({
                         | "deployed",
                       carry_pct: fromPct("carry"),
                       hurdle_pct: fromPct("hurdle"),
+                      waterfall_style: String(fd.get("waterfall")) as "european" | "american",
+                      catch_up: String(fd.get("catch_up")) as "full" | "half" | "none",
                     })
                   );
                 }}
@@ -595,6 +597,29 @@ export function EditRecordModal({
                       defaultValue={asPct(fund.hurdle_pct)}
                       className={inputClass}
                     />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Waterfall">
+                    <select
+                      name="waterfall"
+                      defaultValue={fund.waterfall_style ?? "european"}
+                      className={inputClass}
+                    >
+                      <option value="european">European (whole-fund)</option>
+                      <option value="american">American (deal-by-deal)</option>
+                    </select>
+                  </Field>
+                  <Field label="Catch-up">
+                    <select
+                      name="catch_up"
+                      defaultValue={fund.catch_up ?? "full"}
+                      className={inputClass}
+                    >
+                      <option value="full">Full catch-up</option>
+                      <option value="half">Half catch-up</option>
+                      <option value="none">No catch-up</option>
+                    </select>
                   </Field>
                 </div>
                 <p className="mb-2 text-2xs text-ink-faint">

@@ -27,11 +27,19 @@ export interface CashFlow {
   amount: number; // negative = outflow (contribution), positive = inflow (distribution/NAV)
 }
 
+export type WaterfallStyle = "european" | "american";
+export type CatchUp = "full" | "half" | "none";
+
 export interface FundEconomics {
   mgmtFeePct: number; // e.g. 0.02
   mgmtFeeBasis: "committed" | "deployed";
   carryPct: number; // e.g. 0.20
   hurdlePct: number; // e.g. 0.08 (simple annual preferred return)
+  /** european = whole-fund (carry crystallized at asOf); american = deal-by-deal
+   *  (carry taken at each realization date). */
+  waterfallStyle: WaterfallStyle;
+  /** How fully the GP catches up on the preferred return once the hurdle clears. */
+  catchUp: CatchUp;
   committedCapitalFund?: number;
 }
 
@@ -40,7 +48,11 @@ export const DEFAULT_ECONOMICS: FundEconomics = {
   mgmtFeeBasis: "deployed",
   carryPct: 0.2,
   hurdlePct: 0.08,
+  waterfallStyle: "european",
+  catchUp: "full",
 };
+
+const CATCH_UP_FRACTION: Record<CatchUp, number> = { full: 1, half: 0.5, none: 0 };
 
 const MS_PER_DAY = 86_400_000;
 
@@ -130,9 +142,31 @@ function economicsForFund(fund: Fund, override?: Partial<FundEconomics>): FundEc
       override?.mgmtFeeBasis ?? fund.mgmt_fee_basis ?? DEFAULT_ECONOMICS.mgmtFeeBasis,
     carryPct: override?.carryPct ?? fund.carry_pct ?? DEFAULT_ECONOMICS.carryPct,
     hurdlePct: override?.hurdlePct ?? fund.hurdle_pct ?? DEFAULT_ECONOMICS.hurdlePct,
+    waterfallStyle:
+      override?.waterfallStyle ?? fund.waterfall_style ?? DEFAULT_ECONOMICS.waterfallStyle,
+    catchUp: override?.catchUp ?? fund.catch_up ?? DEFAULT_ECONOMICS.catchUp,
     committedCapitalFund:
       override?.committedCapitalFund ?? fund.committed_capital_fund ?? undefined,
   };
+}
+
+/** Realization proceeds for a fund (fund currency), one inflow per realization. */
+function realizationInflows(data: FundOSData, fund: Fund): CashFlow[] {
+  const lotIds = new Set(
+    allLotPositions(data).filter((p) => p.fund.id === fund.id).map((p) => p.lot.id)
+  );
+  const flows: CashFlow[] = [];
+  for (const r of data.realizations) {
+    if (!lotIds.has(r.lot_id)) continue;
+    const net = r.net_amount ?? 0;
+    if (net === 0) continue;
+    const inFund =
+      r.currency === fund.currency
+        ? net
+        : convert(data.fxRates, net, r.currency, fund.currency, r.realization_date);
+    flows.push({ date: r.realization_date, amount: inFund });
+  }
+  return flows;
 }
 
 /** Gross fund cash flows (fund currency): contributions, realizations, residual NAV. */
@@ -150,17 +184,7 @@ export function fundGrossCashFlows(
     }
   }
 
-  const lotIds = new Set(positions.map((p) => p.lot.id));
-  for (const r of data.realizations) {
-    if (!lotIds.has(r.lot_id)) continue;
-    const net = r.net_amount ?? 0;
-    if (net === 0) continue;
-    const inFund =
-      r.currency === fund.currency
-        ? net
-        : convert(data.fxRates, net, r.currency, fund.currency, r.realization_date);
-    flows.push({ date: r.realization_date, amount: inFund });
-  }
+  flows.push(...realizationInflows(data, fund));
 
   const nav = fundMetrics(data, fund).currentNav;
   if (Number.isFinite(nav) && nav !== 0) {
@@ -206,13 +230,35 @@ export function fundNetCashFlows(
     }
   }
 
-  // Carried interest crystallized at `asOf` on profit above return of capital
-  // plus a simple annual preferred return.
+  // Carried interest. Profit = distributions above paid-in capital. The GP
+  // takes carry only once the preferred return (hurdle) is cleared; the
+  // catch-up decides how much of that preferred is then added back into the
+  // carry base (full = GP catches up on all of it; none = LP keeps it).
   if (econ.carryPct > 0 && Number.isFinite(distributed)) {
+    const profit = distributed - paidIn;
     const preferred = paidIn * econ.hurdlePct * totalYears;
-    const profitBase = Math.max(0, distributed - paidIn - preferred);
-    const carry = econ.carryPct * profitBase;
-    if (carry > 0) flows.push({ date: asOf, amount: -carry });
+    const cleared = profit > preferred;
+    const carryBase = cleared
+      ? Math.max(0, profit - preferred * (1 - CATCH_UP_FRACTION[econ.catchUp]))
+      : 0;
+    const totalCarry = econ.carryPct * carryBase;
+
+    if (totalCarry > 0) {
+      if (econ.waterfallStyle === "american" && distributed > 0) {
+        // Deal-by-deal: the realized share of carry is taken as deals exit;
+        // the NAV-attributable share can't be taken until realized, so it
+        // stays at asOf.
+        for (const r of realizationInflows(data, fund)) {
+          const share = r.amount / distributed;
+          if (share > 0) flows.push({ date: r.date, amount: -totalCarry * share });
+        }
+        const navShare = metrics.currentNav / distributed;
+        if (navShare > 0) flows.push({ date: asOf, amount: -totalCarry * navShare });
+      } else {
+        // European whole-fund: crystallized once at the measurement date.
+        flows.push({ date: asOf, amount: -totalCarry });
+      }
+    }
   }
 
   return flows;

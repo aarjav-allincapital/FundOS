@@ -35,7 +35,7 @@ export function fundNavTrend(data: FundOSData, fund: Fund): TrendPoint[] {
     data.investmentLots.filter((l) => l.fund_id === fund.id).map((l) => l.id)
   );
   return observationDates(data, lotIds).map((d) => ({
-    label: d.slice(0, 7),
+    label: d,
     value: Math.round(navAsOf(data, lotIds, d)),
   }));
 }
@@ -48,7 +48,7 @@ export function companyValueTrend(
     data.investmentLots.filter((l) => l.company_id === companyId).map((l) => l.id)
   );
   return observationDates(data, lotIds).map((d) => ({
-    label: d.slice(0, 7),
+    label: d,
     value: Math.round(navAsOf(data, lotIds, d)),
   }));
 }

@@ -85,6 +85,8 @@ export interface Fund {
   mgmt_fee_basis?: "committed" | "deployed" | null;
   carry_pct?: number | null; // e.g. 0.20
   hurdle_pct?: number | null; // e.g. 0.08 (simple annual preferred return)
+  waterfall_style?: "european" | "american" | null;
+  catch_up?: "full" | "half" | "none" | null;
   created_at: string;
 }
 
