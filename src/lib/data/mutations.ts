@@ -644,3 +644,80 @@ export function exitLot(data: FundOSData, input: ExitLotInput): FundOSData {
     realizations: [...working.realizations, realization],
   };
 }
+
+// ------------------------------------------------------------------
+// Merge lots — combine several lots in the same company + fund + currency
+// into a single position (sum shares & cost, weighted-avg price, earliest date).
+// ------------------------------------------------------------------
+
+export function mergeInvestmentLots(data: FundOSData, lotIds: string[]): FundOSData {
+  const lots = data.investmentLots.filter((l) => lotIds.includes(l.id));
+  if (lots.length < 2) return data;
+
+  const { company_id, fund_id, currency } = lots[0];
+  const sameGroup = lots.every(
+    (l) => l.company_id === company_id && l.fund_id === fund_id && l.currency === currency
+  );
+  if (!sameGroup) return data; // only lots in the same company+fund+currency can merge
+
+  const primary = [...lots].sort((a, b) =>
+    a.investment_date < b.investment_date
+      ? -1
+      : a.investment_date > b.investment_date
+        ? 1
+        : (a.lot_sequence ?? 0) - (b.lot_sequence ?? 0)
+  )[0];
+
+  const sumShares = lots.reduce((s, l) => s + (l.shares_acquired ?? 0), 0);
+  const sumCashLocal = lots.reduce((s, l) => s + l.cash_invested_local, 0);
+  const sumCashFund = lots.reduce((s, l) => s + l.cash_invested_fund, 0);
+  const sumPaidIn = lots.reduce((s, l) => s + (l.paid_in_capital_fund ?? l.cash_invested_fund), 0);
+  const weightedPrice = sumShares > 0 ? sumCashLocal / sumShares : primary.price_per_share_local;
+  const weightedFx = sumCashLocal > 0 ? sumCashFund / sumCashLocal : primary.fx_rate_at_entry;
+  const anyActive = lots.some((l) => l.status === "active" || l.status === "partial_exit");
+
+  const mergedLot: InvestmentLot = {
+    ...primary,
+    shares_acquired: sumShares,
+    price_per_share_local: weightedPrice,
+    cash_invested_local: sumCashLocal,
+    cash_invested_fund: sumCashFund,
+    paid_in_capital_fund: sumPaidIn,
+    fx_rate_at_entry: weightedFx,
+    status: anyActive ? "active" : primary.status,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Rebuild a single current snapshot: at the company's latest mark if any, else cost.
+  const company = data.companies.find((c) => c.id === company_id);
+  const mergedSnaps = data.positionSnapshots
+    .filter((s) => lotIds.includes(s.lot_id))
+    .sort((a, b) => (a.snapshot_date < b.snapshot_date ? 1 : -1));
+  const markPrice = company?.latest_mark_price ?? weightedPrice;
+  const markFx = mergedSnaps[0]?.fx_rate_at_mark ?? weightedFx;
+  const snapDate = mergedSnaps[0]?.snapshot_date ?? primary.investment_date;
+  const mergedSnap = buildSnapshot({
+    lot: mergedLot,
+    snapshot_date: snapDate,
+    mark_price_per_share_local: markPrice,
+    fx_rate_at_mark: markFx,
+    as_converted_shares: sumShares,
+    notes: `Merged ${lots.length} lots`,
+  });
+
+  const removeIds = new Set(lots.filter((l) => l.id !== primary.id).map((l) => l.id));
+
+  return {
+    ...data,
+    investmentLots: data.investmentLots
+      .filter((l) => !removeIds.has(l.id))
+      .map((l) => (l.id === primary.id ? mergedLot : l)),
+    positionSnapshots: [
+      ...data.positionSnapshots.filter((s) => !lotIds.includes(s.lot_id)),
+      mergedSnap,
+    ],
+    realizations: data.realizations.map((r) =>
+      removeIds.has(r.lot_id) ? { ...r, lot_id: primary.id } : r
+    ),
+  };
+}

@@ -13,6 +13,7 @@ import {
   addPositionSnapshot,
   addValuationMark as mutateValuationMark,
   exitLot as mutateExitLot,
+  mergeInvestmentLots,
   type AddCompanyInput,
   type AddDealInput,
   type AddFounderInput,
@@ -47,6 +48,8 @@ import {
 } from "@/lib/data/updates";
 import { deleteRecord as removeRecord, type DeleteRecordKind } from "@/lib/data/deletes";
 import { refreshDisplayFxRates } from "@/lib/fx/refresh-display-fx";
+import { applyEntities } from "@/lib/ingest/commit";
+import type { CommitSummary, ExtractedEntities } from "@/lib/ingest/types";
 
 interface FundOSContextValue {
   data: FundOSData;
@@ -64,11 +67,13 @@ interface FundOSContextValue {
   updateFounder: (input: UpdateFounderInput) => void;
   updateFund: (input: UpdateFundInput) => void;
   updateLot: (input: UpdateLotInput) => void;
+  mergeLots: (lotIds: string[]) => void;
   updateValuationMark: (input: UpdateValuationMarkInput) => void;
   updateSnapshot: (input: UpdateSnapshotInput) => void;
   updateDeal: (input: UpdateDealInput) => void;
   updateFxRate: (input: UpdateFxRateInput) => void;
   deleteRecord: (kind: DeleteRecordKind, id: string) => void;
+  commitDrafts: (entities: ExtractedEntities) => Promise<CommitSummary>;
   refreshDisplayFx: () => Promise<void>;
   resetData: () => void;
 }
@@ -196,6 +201,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       updateFounder: (input) => commit((prev) => patchFounder(prev, input)),
       updateFund: (input) => commit((prev) => patchFund(prev, input)),
       updateLot: (input) => commit((prev) => patchLot(prev, input)),
+      mergeLots: (lotIds) => commit((prev) => mergeInvestmentLots(prev, lotIds)),
       updateValuationMark: (input) =>
         commit((prev) => patchValuationMark(prev, input)),
       updateSnapshot: (input) => commit((prev) => patchSnapshot(prev, input)),
@@ -203,6 +209,18 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       updateFxRate: (input) => commit((prev) => patchFxRate(prev, input)),
       deleteRecord: (kind, id) =>
         commit((prev) => removeRecord(prev, kind, id)),
+      commitDrafts: async (entities) => {
+        // Reuse the same live-FX resolvers the manual add flows use, so
+        // imported lots/marks get correct entry and reporting FX. Nothing here
+        // writes FundOSData directly — applyEntities drives the mutation layer.
+        const snapshot = dataRef.current;
+        const { data: next, summary } = await applyEntities(snapshot, entities, {
+          resolveTransactionFx,
+          resolveReportingFxMap,
+        });
+        commit(() => next);
+        return summary;
+      },
       refreshDisplayFx,
       resetData: () => {
         const bootstrap = createBootstrapData();

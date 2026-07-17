@@ -94,13 +94,15 @@ function scenario22() {
   console.log("\n[22] hurdle reduces carry => higher net IRR");
   const d = doubleInOneYear();
   const fund = d.funds.find((f) => f.id === FUND_IDS.F2)!;
+  // With catch-up "none" the hurdle actually reduces carry (LP keeps the pref);
+  // under full catch-up the GP catches up, so the hurdle only affects timing.
   const noHurdle = fundIrr(d, fund, {
     asOf: "2026-01-01",
-    economics: { mgmtFeePct: 0.02, carryPct: 0.20, hurdlePct: 0 },
+    economics: { mgmtFeePct: 0.02, carryPct: 0.20, hurdlePct: 0, catchUp: "none" },
   }).netIrr;
   const withHurdle = fundIrr(d, fund, {
     asOf: "2026-01-01",
-    economics: { mgmtFeePct: 0.02, carryPct: 0.20, hurdlePct: 0.08 },
+    economics: { mgmtFeePct: 0.02, carryPct: 0.20, hurdlePct: 0.08, catchUp: "none" },
   }).netIrr;
   check("hurdle lifts net IRR", (withHurdle ?? 0) > (noHurdle ?? 0), `noHurdle ${noHurdle} withHurdle ${withHurdle}`);
 }

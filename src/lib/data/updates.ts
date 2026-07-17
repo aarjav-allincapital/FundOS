@@ -451,6 +451,8 @@ export interface UpdateFundInput {
   mgmt_fee_basis?: "committed" | "deployed" | null;
   carry_pct?: number | null;
   hurdle_pct?: number | null;
+  waterfall_style?: "european" | "american" | null;
+  catch_up?: "full" | "half" | "none" | null;
 }
 
 export function updateFund(data: FundOSData, input: UpdateFundInput): FundOSData {
@@ -477,6 +479,9 @@ export function updateFund(data: FundOSData, input: UpdateFundInput): FundOSData
             carry_pct: input.carry_pct !== undefined ? input.carry_pct : f.carry_pct,
             hurdle_pct:
               input.hurdle_pct !== undefined ? input.hurdle_pct : f.hurdle_pct,
+            waterfall_style:
+              input.waterfall_style !== undefined ? input.waterfall_style : f.waterfall_style,
+            catch_up: input.catch_up !== undefined ? input.catch_up : f.catch_up,
           }
         : f
     ),

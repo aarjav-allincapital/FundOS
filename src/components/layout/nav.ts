@@ -9,6 +9,7 @@ import {
   GitBranch,
   ArrowLeftRight,
   FileText,
+  UploadCloud,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,12 @@ export const NAV: NavGroup[] = [
       { id: "overview", label: "Overview", icon: LayoutDashboard, href: "/" },
       { id: "funds", label: "Funds", icon: Landmark, href: "/funds" },
       { id: "portfolio", label: "Portfolio", icon: PieChart, href: "/portfolio" },
+    ],
+  },
+  {
+    label: "Data",
+    items: [
+      { id: "ingest", label: "Ingest", icon: UploadCloud, href: "/ingest" },
     ],
   },
   {
