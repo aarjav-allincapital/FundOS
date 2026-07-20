@@ -71,6 +71,16 @@ export async function middleware(request: NextRequest) {
 
   // Unauthenticated (or non-org) user on a protected page → send to /login.
   if (!isOrgUser && !isPublicPath(pathname)) {
+    if (pathname.startsWith("/api/")) {
+      const denied = NextResponse.json(
+        { error: "Sign in with your @allincapital.vc email to use this API." },
+        { status: 401 },
+      );
+      response.cookies.getAll().forEach((cookie) => {
+        denied.cookies.set(cookie);
+      });
+      return denied;
+    }
     return redirectTo("/login", true);
   }
 

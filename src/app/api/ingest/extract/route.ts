@@ -14,6 +14,14 @@ import { emptyEntities, type ExtractedEntities } from "@/lib/ingest/types";
 
 // Node runtime — the SDK, mammoth, and unpdf need Node, not the edge runtime.
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+/** Gemini OCR on multi-page PDFs can exceed the default 10s Vercel limit. */
+export const maxDuration = 60;
+
+function env(key: string): string | undefined {
+  const v = process.env[key];
+  return v?.trim() || undefined;
+}
 
 interface ExtractRequest {
   fileBase64?: string;
@@ -84,15 +92,15 @@ export async function POST(request: Request) {
   // Provider precedence: OpenRouter (one key → Gemini & other vision models,
   // no Google project) → Gemini → DeepSeek (text only) → Anthropic. First wins.
   try {
-    if (process.env.OPENROUTER_API_KEY) {
+    if (env("OPENROUTER_API_KEY")) {
       const entities = await extractWithOpenRouter(fileBase64, mediaType, filename);
       return NextResponse.json({ entities });
     }
-    if (process.env.GEMINI_API_KEY) {
+    if (env("GEMINI_API_KEY")) {
       const entities = await extractWithGemini(fileBase64, mediaType, filename);
       return NextResponse.json({ entities });
     }
-    if (process.env.DEEPSEEK_API_KEY) {
+    if (env("DEEPSEEK_API_KEY")) {
       const entities = await extractWithOpenAICompatible(fileBase64, mediaType, filename);
       return NextResponse.json({ entities });
     }
@@ -229,13 +237,15 @@ async function extractWithGemini(
   const base = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
   // "…-latest" alias tracks the current model so it doesn't go stale; bump to
   // gemini-pro-latest / gemini-3-pro-preview for the hardest scans.
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const model = env("GEMINI_MODEL") || "gemini-flash-latest";
+  const apiKey = env("GEMINI_API_KEY");
+  if (!apiKey) throw new HttpError("GEMINI_API_KEY is not configured.", 400);
 
   const res = await fetch(`${base}/models/${model}:generateContent`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": process.env.GEMINI_API_KEY as string,
+      "x-goog-api-key": apiKey,
     },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: `${EXTRACTION_SYSTEM}\n\n${EXTRACTION_JSON_INSTRUCTION}` }] },

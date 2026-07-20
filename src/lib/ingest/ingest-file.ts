@@ -45,19 +45,42 @@ export async function ingestFile(file: File): Promise<IngestResult> {
   // .docx often arrives with a blank or generic file.type — trust the extension.
   const mediaType = name.endsWith(".docx") ? DOCX_MEDIA_TYPE : file.type || guessMediaType(name);
   if (mediaType === "application/pdf" || mediaType === DOCX_MEDIA_TYPE || mediaType.startsWith("image/")) {
+    // Vercel request body limit ~4.5MB; base64 expands ~4/3×.
+    const maxBytes = 3 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      return {
+        ok: false,
+        error: `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Use a file under 3 MB, or export to CSV/XLSX for bulk import.`,
+      };
+    }
+
     try {
       const res = await fetch("/api/ingest/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ fileBase64: await fileToBase64(file), mediaType, filename: file.name }),
       });
-      const json = (await res.json()) as { entities?: ExtractedEntities; error?: string };
+      const raw = await res.text();
+      let json: { entities?: ExtractedEntities; error?: string };
+      try {
+        json = JSON.parse(raw) as { entities?: ExtractedEntities; error?: string };
+      } catch {
+        return {
+          ok: false,
+          error: `Extraction failed (${res.status}). ${raw.slice(0, 180) || "Empty response — try a smaller file or sign in again."}`,
+        };
+      }
       if (!res.ok || !json.entities) {
         return { ok: false, error: json.error ?? `Extraction failed (${res.status})` };
       }
       return { ok: true, entities: json.entities, method: "extraction" };
-    } catch {
-      return { ok: false, error: "Could not reach the extraction service." };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "network error";
+      return {
+        ok: false,
+        error: `Could not reach the extraction service (${detail}). Check your connection or try a smaller PDF.`,
+      };
     }
   }
 
