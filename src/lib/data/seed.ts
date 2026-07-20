@@ -278,6 +278,7 @@ for (const s of SPECS) {
     hq_country: s.country,
     hq_city: s.city,
     website: `https://${s.brand.toLowerCase().replace(/\s+/g, "")}.com`,
+    logo_url: null,
     operating_currency: "INR",
     status: s.status,
     latest_mark_price: latestApproved?.pps ?? null,

@@ -100,6 +100,7 @@ export interface Company {
   hq_country: string | null;
   hq_city: string | null;
   website: string | null;
+  logo_url: string | null;
   operating_currency: CurrencyCode;
   status: string; // active | exited | written_off
   latest_mark_price: number | null;

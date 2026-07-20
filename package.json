@@ -36,6 +36,7 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "^16.2.10",
     "postcss": "^8.4.47",
+    "sharp": "^0.35.3",
     "tailwindcss": "^3.4.13",
     "tsx": "^4.23.1",
     "typescript": "^5.6.3"

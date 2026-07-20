@@ -83,6 +83,7 @@ export function addCompany(data: FundOSData, input: AddCompanyInput): FundOSData
     hq_country: input.hq_country ?? null,
     hq_city: input.hq_city ?? null,
     website: null,
+    logo_url: null,
     operating_currency: input.operating_currency,
     status: "active",
     latest_mark_price: null,

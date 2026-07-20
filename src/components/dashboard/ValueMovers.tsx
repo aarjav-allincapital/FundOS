@@ -20,7 +20,7 @@ export function ValueMovers({ data }: { data: FundOSData }) {
 
   return (
     <Panel className="h-full">
-      <PanelHeader title="Top Gainers" subtitle="Unrealized change vs cost basis" />
+      <PanelHeader title="Portfolio" />
       <MoverList rows={gainers} maxAbs={maxAbs} tone="gain" />
     </Panel>
   );

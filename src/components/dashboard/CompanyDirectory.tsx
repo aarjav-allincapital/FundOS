@@ -5,6 +5,7 @@ import { companyRollup, formatMoney, formatMultiple, formatDate } from "@/lib/ca
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { RecordActions } from "@/components/forms/RecordActions";
+import { CompanyLogo } from "@/components/ui/CompanyLogo";
 import { MapPin } from "lucide-react";
 export function CompanyDirectory({ data }: { data: FundOSData }) {
   const cards = data.companies
@@ -33,9 +34,7 @@ export function CompanyDirectory({ data }: { data: FundOSData }) {
             <div key={r.company.id} className="flex flex-col gap-2 bg-surface p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="flex h-6 min-w-6 items-center justify-center rounded bg-ink px-1 text-[10px] font-bold text-surface">
-                    {r.company.abbr}
-                  </span>
+                  <CompanyLogo company={r.company} size={28} />
                   <div>
                     <div className="text-[13px] font-semibold leading-tight text-ink">
                       {r.company.brand_name ?? r.company.legal_name}
