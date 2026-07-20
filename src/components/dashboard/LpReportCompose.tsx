@@ -23,7 +23,6 @@ import {
 } from "@/lib/reporting/lp-email";
 import { Panel, PanelHeader, PanelBody } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
-import { MiniSelect } from "@/components/ui/MiniSelect";
 import {
   Check,
   Copy,
@@ -247,22 +246,38 @@ export function LpReportCompose({ data }: { data: FundOSData }) {
           />
           <PanelBody className="flex flex-col gap-4">
             <div>
-              <label className="mb-1 block text-2xs font-medium uppercase tracking-wide text-ink-faint">
+              <label className="mb-1.5 block text-2xs font-medium uppercase tracking-wide text-ink-faint">
                 Fund
               </label>
-              <MiniSelect
+              <div
+                role="radiogroup"
                 aria-label="Fund"
-                value={draft.fundId}
-                onChange={setFund}
-                className="h-8 w-full px-2"
-                options={[
-                  { value: "all", label: "All funds" },
-                  ...funds.map((f) => ({
-                    value: f.fund.id,
-                    label: `${f.fund.code} — ${f.fund.name}`,
-                  })),
-                ]}
-              />
+                className="grid grid-cols-3 gap-1.5"
+              >
+                <FundPick
+                  selected={draft.fundId === "all"}
+                  label="All funds"
+                  hint="Combined"
+                  onClick={() => setFund("all")}
+                />
+                {funds.map((f) => {
+                  const n =
+                    f.fund.vehicle_code === "F1"
+                      ? "1"
+                      : f.fund.vehicle_code === "F2"
+                        ? "2"
+                        : f.fund.vehicle_code.replace(/^F/i, "") || f.fund.code;
+                  return (
+                    <FundPick
+                      key={f.fund.id}
+                      selected={draft.fundId === f.fund.id}
+                      label={`Fund ${n}`}
+                      hint={f.fund.code}
+                      onClick={() => setFund(f.fund.id)}
+                    />
+                  );
+                })}
+              </div>
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -464,6 +479,41 @@ export function LpReportCompose({ data }: { data: FundOSData }) {
         </Panel>
       </div>
     </div>
+  );
+}
+
+function FundPick({
+  selected,
+  label,
+  hint,
+  onClick,
+}: {
+  selected: boolean;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onClick}
+      className={`rounded border px-2 py-2 text-center transition-colors ${
+        selected
+          ? "border-ink bg-ink text-surface"
+          : "border-line bg-surface text-ink hover:border-line-strong"
+      }`}
+    >
+      <span className="block text-[12px] font-semibold leading-tight">{label}</span>
+      <span
+        className={`mt-0.5 block text-[10px] leading-tight ${
+          selected ? "text-surface/70" : "text-ink-faint"
+        }`}
+      >
+        {hint}
+      </span>
+    </button>
   );
 }
 
