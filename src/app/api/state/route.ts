@@ -9,7 +9,14 @@ import {
   readSyncTimestamp,
   writeAllTables,
 } from "@/lib/data/supabase-tables";
-import { countsOf, hasDataChanged, isFxOnlyChange, recordAudit, snapshotState } from "@/lib/audit/log";
+import {
+  countsOf,
+  findSuspiciousTableWipe,
+  hasDataChanged,
+  isFxOnlyChange,
+  recordAudit,
+  snapshotState,
+} from "@/lib/audit/log";
 import type { FundOSData } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -121,9 +128,9 @@ export async function PUT(request: Request) {
     body.companies.length === 0 &&
     (!Array.isArray(body.investmentLots) || body.investmentLots.length === 0);
 
-  // Always read the current state first: it feeds the empty-overwrite guard
-  // below *and* becomes the pre-write backup, so every replace is recoverable
-  // from the admin dashboard even if this guard is ever wrong.
+  // Always read the current state first: it feeds the guards below *and*
+  // becomes the pre-write backup, so every replace is recoverable from the
+  // admin dashboard even if a guard is ever wrong.
   let current: FundOSData | null = null;
   try {
     current = await readAllTables(sb);
@@ -149,6 +156,31 @@ export async function PUT(request: Request) {
           error: current
             ? "Refused to overwrite existing data with an empty snapshot. Pass ?force=1 to intentionally reset."
             : "Could not verify existing data; write blocked.",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+  // Safety net against *partial* wipes: a stale client (e.g. a browser tab
+  // that hydrated before some tables were populated) can PUT a snapshot where
+  // companies/lots are untouched but another core table silently drops to
+  // zero. That is never a legitimate edit, so refuse it too unless forced.
+  if (!force && current) {
+    const wipedTable = findSuspiciousTableWipe(current, body);
+    if (wipedTable) {
+      await recordAudit(sb, {
+        actorEmail,
+        action: "state.write",
+        status: "blocked",
+        beforeCounts: countsOf(current),
+        afterCounts: countsOf(body),
+        details: `Refused: incoming payload would drop "${wipedTable}" from ${countsOf(current)[wipedTable]} rows to 0. Pass ?force=1 to intentionally clear it.`,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Refused to overwrite existing "${wipedTable}" data with an empty table. Pass ?force=1 to intentionally clear it.`,
         },
         { status: 409 },
       );

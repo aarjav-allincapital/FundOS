@@ -91,6 +91,36 @@ export function isFxOnlyChange(
   return stableFingerprint(before.fxRates) !== stableFingerprint(after.fxRates);
 }
 
+/** Core tables that should never silently drop to zero rows in one write. */
+const PROTECTED_TABLES: (keyof FundOSData)[] = [
+  "companies",
+  "funds",
+  "deals",
+  "rounds",
+  "investmentLots",
+  "valuationMarks",
+  "positionSnapshots",
+];
+
+/**
+ * Detects a *partial* wipe: any protected table that currently has rows but
+ * would be reduced to zero by the incoming payload, even though the write
+ * overall isn't "incomingEmpty" (e.g. companies/lots are untouched but
+ * valuationMarks or positionSnapshots silently dropped to nothing). Returns
+ * the first offending table key, or null if the write looks safe.
+ */
+export function findSuspiciousTableWipe(
+  before: FundOSData,
+  after: FundOSData,
+): keyof FundOSData | null {
+  for (const key of PROTECTED_TABLES) {
+    const beforeLen = Array.isArray(before[key]) ? (before[key] as unknown[]).length : 0;
+    const afterLen = Array.isArray(after[key]) ? (after[key] as unknown[]).length : 0;
+    if (beforeLen > 0 && afterLen === 0) return key;
+  }
+  return null;
+}
+
 function stableFingerprint(value: unknown): string {
   return JSON.stringify(normalizeForFingerprint(value));
 }

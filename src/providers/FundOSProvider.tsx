@@ -156,6 +156,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       let chosen = local;
       let remoteHasData = false;
       let remoteConfirmedEmpty = false;
+      let remoteReadFailed = false;
 
       if (isSupabaseConfigured()) {
         const remote = await loadRemoteState();
@@ -165,9 +166,14 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
           remoteTsRef.current = remote.updatedAt ?? Date.now();
         } else if (remote.status === "empty") {
           remoteConfirmedEmpty = true;
+        } else {
+          // status === "error": read failed — keep local in memory as a
+          // read-only fallback for display. We must NOT persist anything back
+          // (this is a possibly stale/incomplete browser cache) until a
+          // subsequent sync confirms the real remote state — otherwise a
+          // transient network hiccup silently wipes the shared database.
+          remoteReadFailed = true;
         }
-        // status === "error": read failed — keep local in memory, but we must
-        // NOT persist anything back (guarded below) or we could wipe the DB.
       }
 
       if (cancelled) return;
@@ -175,7 +181,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       setData(chosen);
       saveFundOSData(chosen);
       setLocalUpdatedAt(remoteHasData ? remoteTsRef.current : getLocalUpdatedAt() ?? 0);
-      canPersistRemote.current = true;
+      canPersistRemote.current = !remoteReadFailed;
 
       // Seed the DB ONLY when the server explicitly confirmed it is empty AND we
       // actually have real local data to seed. A failed read (status "error")
@@ -234,6 +240,10 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       // Only adopt a successful, populated read. "empty"/"error" are ignored so
       // a transient failure never blanks the in-memory data a user is viewing.
       if (remote.status !== "ok" || remote.updatedAt == null) return;
+      // A confirmed-good read proves we now hold the authoritative snapshot,
+      // so it's safe to allow persisting again (recovers from the read-only
+      // fallback mode entered when the initial hydrate's remote read failed).
+      canPersistRemote.current = true;
       if (remote.updatedAt !== remoteTsRef.current) {
         remoteTsRef.current = remote.updatedAt;
         const next = remote.data;
