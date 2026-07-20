@@ -78,6 +78,19 @@ export function ReviewTable({
 }) {
   if (drafts.length === 0) return null;
   const includedCount = drafts.filter((d) => d.include).length;
+  const hasAiDrafts = drafts.some(
+    (d) => d.include && d.provenance.method === "extraction",
+  );
+
+  function handleCommitClick() {
+    if (hasAiDrafts) {
+      const ok = window.confirm(
+        "These values were extracted by AI. Kindly recheck them before you commit.\n\nContinue and commit?",
+      );
+      if (!ok) return;
+    }
+    onCommit();
+  }
 
   return (
     <Panel>
@@ -96,7 +109,7 @@ export function ReviewTable({
             </button>
             <button
               type="button"
-              onClick={onCommit}
+              onClick={handleCommitClick}
               disabled={committing || includedCount === 0}
               className="rounded bg-ink px-3 py-1.5 text-2xs font-semibold text-surface hover:bg-ink/90 disabled:opacity-50"
             >
