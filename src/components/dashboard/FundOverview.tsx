@@ -3,8 +3,8 @@
 import type { FundOSData } from "@/lib/types";
 import {
   allFundMetrics,
+  fundEventTimeline,
   fundIrr,
-  fundNavTrend,
   formatMoney,
   formatMultiple,
   formatPercent,
@@ -12,7 +12,7 @@ import {
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
 import { Delta } from "@/components/ui/Delta";
-import { TrendLine } from "@/components/charts/TrendLine";
+import { MultiLineTimeline } from "@/components/charts/MultiLineTimeline";
 import { EditButton } from "@/components/forms/EditButton";
 
 export function FundOverview({ data }: { data: FundOSData }) {
@@ -21,7 +21,7 @@ export function FundOverview({ data }: { data: FundOSData }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {metrics.map((m) => {
-        const trend = fundNavTrend(data, m.fund);
+        const { series, events } = fundEventTimeline(data, m.fund);
         const { grossIrr, netIrr } = fundIrr(data, m.fund);
         const ccy = m.currency;
         const navGainPct =
@@ -68,11 +68,15 @@ export function FundOverview({ data }: { data: FundOSData }) {
               </Field>
             </div>
 
-            <div className="mt-3 px-4">
-              <TrendLine
-                data={trend}
-                height={56}
-                valueFormatter={(v) => formatMoney(v, ccy, { compact: true })}
+            <div className="mt-3 px-4 pb-1">
+              <div className="mb-1 text-2xs font-medium uppercase tracking-wide text-ink-faint">
+                Timeline · NAV, deployed & events
+              </div>
+              <MultiLineTimeline
+                series={series}
+                events={events}
+                height={168}
+                currency={ccy}
               />
             </div>
 

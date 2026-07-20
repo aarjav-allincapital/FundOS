@@ -48,3 +48,37 @@ export async function sendOtpEmail(
   }
   return { ok: true };
 }
+
+export async function sendHtmlEmail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  text?: string;
+  replyTo?: string;
+  from?: string;
+}): Promise<
+  { ok: true; id: string | null } | { ok: false; error: string }
+> {
+  const resend = getResendClient();
+  if (!resend) {
+    return {
+      ok: false,
+      error:
+        "Email delivery is not configured (RESEND_API_KEY missing). Use Copy or Open in email instead.",
+    };
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: opts.from?.trim() || getFromAddress(),
+    to: opts.to,
+    subject: opts.subject,
+    html: opts.html,
+    ...(opts.text ? { text: opts.text } : {}),
+    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true, id: data?.id ?? null };
+}

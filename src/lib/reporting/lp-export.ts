@@ -5,14 +5,13 @@
 
 import * as XLSX from "xlsx";
 import type { FundOSData } from "@/lib/types";
+import { allFundMetrics, allLotPositions, fundIrr } from "@/lib/calc";
 import {
-  allFundMetrics,
-  allLotPositions,
-  fundIrr,
-  formatMoney,
-  formatMultiple,
-  formatPercent,
-} from "@/lib/calc";
+  buildLpReportHtml,
+  defaultIntro,
+  type LpReportOptions,
+  type LpSectionId,
+} from "@/lib/reporting/lp-report-html";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -114,98 +113,31 @@ export function downloadLpExcel(data: FundOSData, asOf = todayIso()) {
   );
 }
 
-/** Open a printable LP update in a new window (use browser Print → Save as PDF). */
-export function openLpUpdatePdf(data: FundOSData, asOf = todayIso()) {
-  const funds = allFundMetrics(data);
-  const positions = allLotPositions(data).filter(
-    (p) => p.lot.status === "active" || p.lot.status === "partial_exit"
-  );
+export interface LpPdfOptions {
+  fundId?: string | "all";
+  sections?: LpSectionId[];
+  asOf?: string;
+  intro?: string;
+  signoff?: string;
+}
 
-  const fundBlocks = funds
-    .map((f) => {
-      const { grossIrr, netIrr } = fundIrr(data, f.fund);
-      return `
-        <section class="fund">
-          <h2>${escapeHtml(f.fund.code)} — ${escapeHtml(f.fund.name)}</h2>
-          <table class="kpis">
-            <tr>
-              <td><span class="label">NAV</span><br/><strong>${formatMoney(f.currentNav, f.currency)}</strong></td>
-              <td><span class="label">Deployed</span><br/><strong>${formatMoney(f.deployedCost, f.currency)}</strong></td>
-              <td><span class="label">Realized</span><br/><strong>${formatMoney(f.realizedProceeds, f.currency)}</strong></td>
-              <td><span class="label">Gross MOIC</span><br/><strong>${formatMultiple(f.grossMoic)}</strong></td>
-              <td><span class="label">DPI</span><br/><strong>${formatMultiple(f.dpi)}</strong></td>
-              <td><span class="label">Gross IRR</span><br/><strong>${formatPercent(grossIrr, { fraction: true })}</strong></td>
-              <td><span class="label">Net IRR</span><br/><strong>${formatPercent(netIrr, { fraction: true })}</strong></td>
-            </tr>
-          </table>
-        </section>`;
-    })
-    .join("");
+/**
+ * Open a printable LP update in a new window (browser Print → Save as PDF).
+ * Uses the same branded builder as the email so the PDF matches the inbox view.
+ */
+export function openLpUpdatePdf(data: FundOSData, opts: LpPdfOptions = {}) {
+  const fundId = opts.fundId ?? "all";
+  const asOf = opts.asOf ?? todayIso();
+  const report: LpReportOptions = {
+    fundId,
+    sections: opts.sections ?? ["fundSummary", "positions", "realizations"],
+    asOf,
+    intro: opts.intro ?? defaultIntro(data, { fundId, asOf }),
+    signoff: opts.signoff,
+    forPrint: true,
+  };
 
-  const rows = positions
-    .map(
-      (p) => `
-      <tr>
-        <td>${escapeHtml(p.fund.code)}</td>
-        <td>${escapeHtml(p.company.brand_name || p.company.legal_name)}</td>
-        <td class="mono">${escapeHtml(p.lot.code)}</td>
-        <td>${escapeHtml(p.round?.round_name ?? "—")}</td>
-        <td class="num">${formatMoney(p.costBasisFund, p.fund.currency)}</td>
-        <td class="num">${formatMoney(p.fmvFund, p.fund.currency)}</td>
-        <td class="num">${formatMultiple(p.moic)}</td>
-        <td>${escapeHtml(p.lot.status)}</td>
-      </tr>`
-    )
-    .join("");
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>All In Capital — LP Update ${asOf}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: "Segoe UI", system-ui, sans-serif; color: #111; margin: 40px; font-size: 12px; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    .sub { color: #666; margin-bottom: 28px; }
-    h2 { font-size: 14px; margin: 24px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-    .kpis { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-    .kpis td { padding: 8px 10px 8px 0; vertical-align: top; }
-    .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #888; }
-    table.positions { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    table.positions th, table.positions td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
-    table.positions th { font-size: 10px; text-transform: uppercase; color: #888; font-weight: 600; }
-    .num { text-align: right; font-variant-numeric: tabular-nums; }
-    .mono { font-family: ui-monospace, monospace; font-size: 11px; }
-    .foot { margin-top: 32px; font-size: 10px; color: #999; }
-    @media print {
-      body { margin: 16px; }
-      button { display: none !important; }
-    }
-  </style>
-</head>
-<body>
-  <button onclick="window.print()" style="float:right;padding:8px 14px;cursor:pointer;">Print / Save as PDF</button>
-  <h1>All In Capital — LP Update</h1>
-  <p class="sub">As of ${asOf} · Generated by FundOS</p>
-  ${fundBlocks}
-  <h2>Active positions</h2>
-  <table class="positions">
-    <thead>
-      <tr>
-        <th>Fund</th><th>Company</th><th>Lot</th><th>Round</th>
-        <th class="num">Cost</th><th class="num">FMV</th><th class="num">MOIC</th><th>Status</th>
-      </tr>
-    </thead>
-    <tbody>${rows || `<tr><td colspan="8">No active positions.</td></tr>`}</tbody>
-  </table>
-  <p class="foot">
-    Net IRR is a modeled fee/carry approximation (European-style), not an audited capital-account figure.
-    Confidential — All In Capital.
-  </p>
-  <script>setTimeout(() => window.print(), 400);</script>
-</body>
-</html>`;
+  const html = buildLpReportHtml(data, report);
 
   const win = window.open("", "_blank");
   if (!win) {
@@ -213,12 +145,4 @@ export function openLpUpdatePdf(data: FundOSData, asOf = todayIso()) {
   }
   win.document.write(html);
   win.document.close();
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

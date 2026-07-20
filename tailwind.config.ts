@@ -28,6 +28,10 @@ const config: Config = {
           subtle: "#FAFAFA",
           sunken: "#F4F4F4",
         },
+        // Brand — All In Capital red, used for report/reporting accents
+        brand: {
+          red: "#F0524B",
+        },
         // Semantic — used sparingly, only for meaning
         gain: "#0F7B4D",
         loss: "#B42318",

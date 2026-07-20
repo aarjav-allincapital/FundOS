@@ -2,7 +2,7 @@
 
 import { useFundOS } from "@/providers/FundOSProvider";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import { ReportingStatus } from "@/components/dashboard/ReportingStatus";
+import { LpReportCompose } from "@/components/dashboard/LpReportCompose";
 
 export default function ReportingPage() {
   const { data } = useFundOS();
@@ -10,9 +10,9 @@ export default function ReportingPage() {
     <>
       <PageHeader
         title="Reporting"
-        description="NAV readiness, mark approval status and exports."
+        description="Select relevant fund information, preview the branded update, and send it to LPs, or download a PDF/Excel."
       />
-      <ReportingStatus data={data} />
+      <LpReportCompose data={data} />
     </>
   );
 }
