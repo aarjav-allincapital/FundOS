@@ -9,7 +9,7 @@ import {
   readSyncTimestamp,
   writeAllTables,
 } from "@/lib/data/supabase-tables";
-import { countsOf, recordAudit, snapshotState } from "@/lib/audit/log";
+import { countsOf, hasDataChanged, recordAudit, snapshotState } from "@/lib/audit/log";
 import type { FundOSData } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -153,6 +153,21 @@ export async function PUT(request: Request) {
         { status: 409 },
       );
     }
+  }
+
+  // No-op saves must not rewrite tables, take backups, or spam the admin audit
+  // log — that is how a free-plan DB fills up from background/debounced writes.
+  // Portfolio "Snapshots & Logs" (position_snapshots) is unrelated and untouched.
+  const changed = force || hasDataChanged(current, body);
+  if (!changed) {
+    const updatedAtMs = await readSyncTimestamp(sb);
+    return NextResponse.json({
+      ok: true,
+      updatedAt: updatedAtMs
+        ? new Date(updatedAtMs).toISOString()
+        : new Date().toISOString(),
+      noop: true,
+    });
   }
 
   if (current && hasRelationalData(current)) {
