@@ -99,6 +99,36 @@ export async function PUT(request: Request) {
     );
   }
 
+  // Safety net against accidental wipes: the write is a full delete+replace, so
+  // an empty/bootstrap payload would erase everything. Refuse to overwrite a
+  // populated database with a snapshot that carries no companies and no lots,
+  // unless the caller explicitly forces it (?force=1) — e.g. an intentional reset.
+  const force = new URL(request.url).searchParams.get("force") === "1";
+  const incomingEmpty =
+    body.companies.length === 0 &&
+    (!Array.isArray(body.investmentLots) || body.investmentLots.length === 0);
+  if (incomingEmpty && !force) {
+    try {
+      const current = await readAllTables(sb);
+      if (hasRelationalData(current)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Refused to overwrite existing data with an empty snapshot. Pass ?force=1 to intentionally reset.",
+          },
+          { status: 409 },
+        );
+      }
+    } catch {
+      // If we can't verify current state, err on the safe side and block.
+      return NextResponse.json(
+        { ok: false, error: "Could not verify existing data; write blocked." },
+        { status: 409 },
+      );
+    }
+  }
+
   try {
     await writeAllTables(sb, body);
     const updatedAt = await bumpSyncTimestamp(sb);

@@ -14,6 +14,7 @@ import {
 import {
   createDebouncedRemoteSaver,
   loadRemoteState,
+  saveRemoteState,
 } from "@/lib/data/remote-state";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
@@ -92,6 +93,16 @@ interface FundOSContextValue {
 
 const FundOSContext = createContext<FundOSContextValue | null>(null);
 
+/**
+ * True when a snapshot holds real portfolio data (not just the structural
+ * bootstrap of fund brand + fund vehicles). Used to decide whether local data
+ * is worth seeding into an empty remote — we must never seed a bare bootstrap
+ * over a database another teammate may already have populated.
+ */
+function hasMeaningfulData(d: FundOSData): boolean {
+  return d.companies.length > 0 || d.investmentLots.length > 0;
+}
+
 export function FundOSProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<FundOSData>(createBootstrapData);
   const dataRef = useRef(data);
@@ -141,33 +152,40 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       // When it exists we adopt it unconditionally so every browser shows the
       // same data — this is what stops a stale local cache (e.g. old seed data)
       // from lingering in one browser. Local is only a fallback when the DB is
-      // empty or unreachable (offline).
+      // confirmed empty or the read failed (offline / transient auth).
       let chosen = local;
-      let remoteExists = false;
+      let remoteHasData = false;
+      let remoteConfirmedEmpty = false;
 
       if (isSupabaseConfigured()) {
-        try {
-          const remote = await loadRemoteState();
-          if (remote?.data) {
-            remoteExists = true;
-            chosen = remote.data;
-            remoteTsRef.current = remote.updatedAt ?? Date.now();
-          }
-        } catch (err) {
-          console.warn("[FundOS] Supabase load failed, using local cache:", err);
+        const remote = await loadRemoteState();
+        if (remote.status === "ok") {
+          remoteHasData = true;
+          chosen = remote.data;
+          remoteTsRef.current = remote.updatedAt ?? Date.now();
+        } else if (remote.status === "empty") {
+          remoteConfirmedEmpty = true;
         }
+        // status === "error": read failed — keep local in memory, but we must
+        // NOT persist anything back (guarded below) or we could wipe the DB.
       }
 
       if (cancelled) return;
 
       setData(chosen);
       saveFundOSData(chosen);
-      setLocalUpdatedAt(remoteExists ? remoteTsRef.current : getLocalUpdatedAt() ?? 0);
+      setLocalUpdatedAt(remoteHasData ? remoteTsRef.current : getLocalUpdatedAt() ?? 0);
       canPersistRemote.current = true;
 
-      // Seed the DB only when it was empty; adopting an existing remote must
-      // NOT trigger a write-back (that would just echo the same data).
-      if (isSupabaseConfigured() && !remoteExists) {
+      // Seed the DB ONLY when the server explicitly confirmed it is empty AND we
+      // actually have real local data to seed. A failed read (status "error")
+      // must never trigger a write — that is exactly how a transient hiccup used
+      // to overwrite a populated database with an empty bootstrap.
+      if (
+        isSupabaseConfigured() &&
+        remoteConfirmedEmpty &&
+        hasMeaningfulData(chosen)
+      ) {
         dirtyRef.current = true;
         remoteSaver.current.schedule(chosen);
       }
@@ -213,7 +231,9 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
     if (!isSupabaseConfigured() || dirtyRef.current) return;
     try {
       const remote = await loadRemoteState();
-      if (!remote?.data || remote.updatedAt == null) return;
+      // Only adopt a successful, populated read. "empty"/"error" are ignored so
+      // a transient failure never blanks the in-memory data a user is viewing.
+      if (remote.status !== "ok" || remote.updatedAt == null) return;
       if (remote.updatedAt !== remoteTsRef.current) {
         remoteTsRef.current = remote.updatedAt;
         const next = remote.data;
@@ -391,8 +411,22 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       refreshDisplayFx,
       resetData: () => {
         const bootstrap = createBootstrapData();
-        persist(bootstrap);
         setData(bootstrap);
+        saveFundOSData(bootstrap);
+        touchLocalUpdatedAt();
+        // Intentional wipe → force past the server's empty-overwrite guard.
+        if (canPersistRemote.current) {
+          dirtyRef.current = true;
+          void saveRemoteState(bootstrap, { force: true }).then((result) => {
+            if (result.ok) {
+              if (result.updatedAt != null) {
+                remoteTsRef.current = result.updatedAt;
+                setLocalUpdatedAt(result.updatedAt);
+              }
+              dirtyRef.current = false;
+            }
+          });
+        }
       },
     }),
     [data, isLoading, isHydrated, commit, refreshDisplayFx, persist]

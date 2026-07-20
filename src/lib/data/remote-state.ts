@@ -15,26 +15,40 @@ export interface RemoteState {
   updatedAt: number | null;
 }
 
-/** Load the persisted snapshot + its server timestamp. */
-export async function loadRemoteState(): Promise<RemoteState | null> {
-  if (!isSupabaseConfigured()) return null;
+/**
+ * Result of a remote load. Crucially distinguishes a *confirmed empty* server
+ * (the read succeeded and there is genuinely no data yet) from a *failed* read
+ * (network error, auth 401, 500). Callers must never treat a failed read as
+ * "empty" — doing so risks overwriting a populated database with local/bootstrap
+ * data on the next save (a silent, catastrophic wipe).
+ */
+export type RemoteLoad =
+  | { status: "ok"; data: FundOSData; updatedAt: number | null }
+  | { status: "empty" }
+  | { status: "error" };
+
+/** Load the persisted snapshot, distinguishing empty vs failed reads. */
+export async function loadRemoteState(): Promise<RemoteLoad> {
+  if (!isSupabaseConfigured()) return { status: "error" };
   try {
     const res = await fetch("/api/state", { cache: "no-store" });
-    if (!res.ok) return null;
+    if (!res.ok) return { status: "error" };
     const json = (await res.json()) as {
       ok: boolean;
       data: FundOSData | null;
       updatedAt: string | null;
     };
-    if (!json.ok) return null;
+    if (!json.ok) return { status: "error" };
+    if (!json.data) return { status: "empty" };
     const parsed = json.updatedAt ? Date.parse(json.updatedAt) : NaN;
     return {
+      status: "ok",
       data: json.data,
       updatedAt: Number.isFinite(parsed) ? parsed : null,
     };
   } catch (err) {
     console.warn("[FundOS] remote load failed:", err);
-    return null;
+    return { status: "error" };
   }
 }
 
@@ -44,11 +58,17 @@ export interface SaveResult {
   updatedAt: number | null;
 }
 
-/** Persist the full snapshot. Returns the new server timestamp on success. */
-export async function saveRemoteState(data: FundOSData): Promise<SaveResult> {
+/**
+ * Persist the full snapshot. Returns the new server timestamp on success.
+ * Pass `force` to override the server's empty-overwrite guard (intentional reset).
+ */
+export async function saveRemoteState(
+  data: FundOSData,
+  opts: { force?: boolean } = {},
+): Promise<SaveResult> {
   if (!isSupabaseConfigured()) return { ok: false, updatedAt: null };
   try {
-    const res = await fetch("/api/state", {
+    const res = await fetch(`/api/state${opts.force ? "?force=1" : ""}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
