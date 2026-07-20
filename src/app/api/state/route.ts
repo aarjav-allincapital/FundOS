@@ -121,12 +121,14 @@ export async function PUT(request: Request) {
 
   // Safety net against accidental wipes: the write is a full delete+replace, so
   // an empty/bootstrap payload would erase everything. Refuse to overwrite a
-  // populated database with a snapshot that carries no companies and no lots,
-  // unless the caller explicitly forces it (?force=1) — e.g. an intentional reset.
+  // populated database with a snapshot that carries no companies, unless the
+  // caller explicitly forces it (?force=1) — e.g. an intentional reset.
   const force = new URL(request.url).searchParams.get("force") === "1";
-  const incomingEmpty =
-    body.companies.length === 0 &&
-    (!Array.isArray(body.investmentLots) || body.investmentLots.length === 0);
+  // A legitimate save always carries companies — the portfolio's anchor entity.
+  // The bare bootstrap (fund brand + fund vehicles, zero companies) and any
+  // degraded/partial client snapshot have none, so treat "no companies" as an
+  // empty payload regardless of what other tables happen to contain.
+  const incomingEmpty = body.companies.length === 0;
 
   // Always read the current state first: it feeds the guards below *and*
   // becomes the pre-write backup, so every replace is recoverable from the

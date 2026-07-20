@@ -135,7 +135,12 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
   const persist = useCallback((next: FundOSData) => {
     saveFundOSData(next);
     touchLocalUpdatedAt();
-    if (canPersistRemote.current) {
+    // Never mirror an empty/bootstrap snapshot to the shared DB. A real
+    // portfolio always has companies; a payload without any is either a
+    // degraded load (failed/partial remote read) or the bare bootstrap, and
+    // pushing it would wipe the org's data. Intentional resets go through
+    // resetData() with ?force=1, which bypasses this path entirely.
+    if (canPersistRemote.current && hasMeaningfulData(next)) {
       dirtyRef.current = true;
       remoteSaver.current.schedule(next);
     }
@@ -181,17 +186,21 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       setData(chosen);
       saveFundOSData(chosen);
       setLocalUpdatedAt(remoteHasData ? remoteTsRef.current : getLocalUpdatedAt() ?? 0);
-      canPersistRemote.current = !remoteReadFailed;
 
-      // Seed the DB ONLY when the server explicitly confirmed it is empty AND we
-      // actually have real local data to seed. A failed read (status "error")
-      // must never trigger a write — that is exactly how a transient hiccup used
-      // to overwrite a populated database with an empty bootstrap.
-      if (
-        isSupabaseConfigured() &&
-        remoteConfirmedEmpty &&
-        hasMeaningfulData(chosen)
-      ) {
+      // Remote persistence is enabled ONLY when we are confident we hold the
+      // authoritative dataset, so no background/side-effect write can ever push
+      // a degraded snapshot over the org's data. Two safe cases:
+      //   1. remote read succeeded ("ok") — we now mirror the real DB, and
+      //   2. remote is confirmed empty AND our local copy has real data to seed.
+      // A failed read, or an empty remote with no meaningful local data, keeps
+      // the session strictly READ-ONLY until a later sync confirms real data.
+      const okToSeed =
+        isSupabaseConfigured() && remoteConfirmedEmpty && hasMeaningfulData(chosen);
+      canPersistRemote.current = remoteHasData || okToSeed;
+      if (remoteReadFailed) canPersistRemote.current = false;
+
+      // Seed the DB only in the confirmed-empty + meaningful-local case above.
+      if (okToSeed) {
         dirtyRef.current = true;
         remoteSaver.current.schedule(chosen);
       }
@@ -199,10 +208,13 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       setIsHydrated(true);
 
+      // A display-FX refresh must never resurrect a wipe: only persist it when
+      // the loaded snapshot actually has data (persist() also re-checks).
       refreshDisplayFxRates(chosen).then((next) => {
         if (cancelled || next === chosen) return;
         setData(next);
-        persist(next);
+        if (hasMeaningfulData(next)) persist(next);
+        else saveFundOSData(next);
       });
     }
 
