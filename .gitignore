@@ -32,3 +32,6 @@ yarn-debug.log*
 yarn-error.log*
 coverage/
 .vercel
+
+# Data dumps / backups pulled by one-off scripts — real financial data, never commit
+scripts/*.json

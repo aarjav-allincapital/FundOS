@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { ADMIN_EMAILS } from "@/lib/audit/admin";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
@@ -82,6 +83,25 @@ export async function middleware(request: NextRequest) {
       return denied;
     }
     return redirectTo("/login", true);
+  }
+
+  // Admin surfaces (audit log + backups) are restricted to a small allowlist,
+  // separate from the org-wide domain gate above.
+  const isAdmin = Boolean(email && ADMIN_EMAILS.includes(email));
+  const isAdminPath = pathname === "/logs" || pathname.startsWith("/logs/") ||
+    pathname === "/api/admin" || pathname.startsWith("/api/admin/");
+  if (isAdminPath && !isAdmin) {
+    if (pathname.startsWith("/api/")) {
+      const denied = NextResponse.json(
+        { error: "Admin access required." },
+        { status: 403 },
+      );
+      response.cookies.getAll().forEach((cookie) => {
+        denied.cookies.set(cookie);
+      });
+      return denied;
+    }
+    return redirectTo("/", false);
   }
 
   return response;

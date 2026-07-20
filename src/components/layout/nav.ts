@@ -10,6 +10,7 @@ import {
   ArrowLeftRight,
   FileText,
   UploadCloud,
+  History,
   type LucideIcon,
 } from "lucide-react";
 
@@ -18,6 +19,8 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   href: string;
+  /** Hidden from the sidebar unless the signed-in user is an admin. */
+  adminOnly?: boolean;
 }
 
 export interface NavGroup {
@@ -60,6 +63,7 @@ export const NAV: NavGroup[] = [
     items: [
       { id: "fx", label: "FX Engine", icon: ArrowLeftRight, href: "/fx" },
       { id: "reporting", label: "Reporting", icon: FileText, href: "/reporting" },
+      { id: "logs", label: "Logs", icon: History, href: "/logs", adminOnly: true },
     ],
   },
 ];

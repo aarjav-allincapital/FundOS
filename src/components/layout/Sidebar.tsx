@@ -11,9 +11,13 @@ import {
   loadSidebarCollapsed,
   saveSidebarCollapsed,
 } from "@/lib/data/storage";
+import { useAuth } from "@/providers/AuthProvider";
+import { isAdminEmail } from "@/lib/audit/admin";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { email } = useAuth();
+  const isAdmin = isAdminEmail(email);
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -80,7 +84,10 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-3">
-        {NAV.map((group) => (
+        {NAV.map((group) => {
+          const items = group.items.filter((item) => !item.adminOnly || isAdmin);
+          if (items.length === 0) return null;
+          return (
           <div key={group.label} className="mb-4">
             {!collapsed && (
               <div className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
@@ -88,7 +95,7 @@ export function Sidebar() {
               </div>
             )}
             <ul className="space-y-0.5">
-              {group.items.map((item) => {
+              {items.map((item) => {
                 const Icon = item.icon;
                 const isActive =
                   item.href === "/"
@@ -121,7 +128,8 @@ export function Sidebar() {
               })}
             </ul>
           </div>
-        ))}
+          );
+        })}
       </nav>
     </aside>
   );
