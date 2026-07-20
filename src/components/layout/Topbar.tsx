@@ -17,10 +17,8 @@ export interface SearchItem {
 
 export function Topbar({
   searchItems,
-  asOf,
 }: {
   searchItems: SearchItem[];
-  asOf: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -145,11 +143,6 @@ export function Topbar({
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
-        <div className="hidden sm:flex flex-col items-end leading-tight">
-          <span className="text-2xs text-ink-faint">As of</span>
-          <span className="tnum text-[13px] font-medium text-ink">{asOf}</span>
-        </div>
-        <div className="h-6 w-px bg-line" />
         <div className="flex items-center gap-1.5">
           <span className="relative flex h-2 w-2" aria-hidden>
             <span className="absolute inline-flex h-full w-full animate-live-ping rounded-full bg-gain" />
