@@ -48,8 +48,11 @@ export function countsOf(data: FundOSData): Counts {
 
 /**
  * Cheap change detector for admin logging / backup gating. Compares row counts
- * first, then a stable JSON fingerprint of the countable tables. Ignores
- * unrelated keys that may appear on the client payload.
+ * first, then a stable JSON fingerprint of the countable tables.
+ *
+ * Arrays are sorted by `id` before fingerprinting — Postgres SELECT order is
+ * undefined, so without this every client round-trip looked like a "change"
+ * even when the data was identical (spam audit rows labeled "no change").
  */
 export function hasDataChanged(
   before: FundOSData | null,
@@ -69,17 +72,64 @@ export function hasDataChanged(
   return false;
 }
 
+/**
+ * True when the only tables that differ are FX rates (or nothing). Used to
+ * skip admin audit/backup noise from automatic live-FX refreshes — those are
+ * not user edits. Portfolio tables still trigger a full audit + backup.
+ */
+export function isFxOnlyChange(
+  before: FundOSData | null,
+  after: FundOSData,
+): boolean {
+  if (!before) return false;
+  for (const key of COUNTABLE_KEYS) {
+    if (key === "fxRates") continue;
+    if (stableFingerprint(before[key]) !== stableFingerprint(after[key])) {
+      return false;
+    }
+  }
+  return stableFingerprint(before.fxRates) !== stableFingerprint(after.fxRates);
+}
+
 function stableFingerprint(value: unknown): string {
-  return JSON.stringify(value, (_k, v) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.keys(v as object)
-          .sort()
-          .reduce<Record<string, unknown>>((acc, key) => {
-            acc[key] = (v as Record<string, unknown>)[key];
-            return acc;
-          }, {})
-      : v,
-  );
+  return JSON.stringify(normalizeForFingerprint(value));
+}
+
+/** Sort object keys, sort arrays by id, treat null/undefined as null. */
+function normalizeForFingerprint(value: unknown): unknown {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) {
+    const rows = value.map((item) => normalizeForFingerprint(item));
+    rows.sort((a, b) => {
+      const idA =
+        a && typeof a === "object" && "id" in a
+          ? String((a as { id: unknown }).id ?? "")
+          : "";
+      const idB =
+        b && typeof b === "object" && "id" in b
+          ? String((b as { id: unknown }).id ?? "")
+          : "";
+      return idA < idB ? -1 : idA > idB ? 1 : 0;
+    });
+    return rows;
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(obj).sort()) {
+      const v = obj[key];
+      // Ignore volatile timestamps that churn on every rewrite without a
+      // user-visible edit (would otherwise trip hasDataChanged every save).
+      if (key === "updated_at" || key === "created_at") continue;
+      out[key] = normalizeForFingerprint(v);
+    }
+    return out;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // Collapse float noise from JSON/Postgres round-trips.
+    return Math.round(value * 1e6) / 1e6;
+  }
+  return value;
 }
 
 /** Insert an audit_log row. Never throws — logging must not break the write path. */

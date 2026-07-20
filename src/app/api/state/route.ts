@@ -9,7 +9,7 @@ import {
   readSyncTimestamp,
   writeAllTables,
 } from "@/lib/data/supabase-tables";
-import { countsOf, hasDataChanged, recordAudit, snapshotState } from "@/lib/audit/log";
+import { countsOf, hasDataChanged, isFxOnlyChange, recordAudit, snapshotState } from "@/lib/audit/log";
 import type { FundOSData } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -170,21 +170,27 @@ export async function PUT(request: Request) {
     });
   }
 
-  if (current && hasRelationalData(current)) {
+  // Live FX refreshes still persist so every browser shares the new rate, but
+  // they are not a user edit — skip audit_log + state_backups for those alone.
+  const fxOnly = !force && isFxOnlyChange(current, body);
+
+  if (!fxOnly && current && hasRelationalData(current)) {
     await snapshotState(sb, current, "pre-write-auto", actorEmail);
   }
 
   try {
     await writeAllTables(sb, body);
     const updatedAt = await bumpSyncTimestamp(sb);
-    await recordAudit(sb, {
-      actorEmail,
-      action: "state.write",
-      status: "ok",
-      beforeCounts: current ? countsOf(current) : null,
-      afterCounts: countsOf(body),
-      details: force ? "Forced write (?force=1)." : undefined,
-    });
+    if (!fxOnly) {
+      await recordAudit(sb, {
+        actorEmail,
+        action: "state.write",
+        status: "ok",
+        beforeCounts: current ? countsOf(current) : null,
+        afterCounts: countsOf(body),
+        details: force ? "Forced write (?force=1)." : undefined,
+      });
+    }
     return NextResponse.json({ ok: true, updatedAt });
   } catch (err) {
     await recordAudit(sb, {
