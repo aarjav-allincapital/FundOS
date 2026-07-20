@@ -663,26 +663,6 @@ termSheets.push({
 });
 
 // -----------------------------------------------------------------
-// A partial realization (exit) to exercise realized proceeds / DPI
-// -----------------------------------------------------------------
-
-realizations.push({
-  id: "real-qc-1",
-  lot_id: "lot-qc-f2",
-  company_id: "co-qc",
-  realization_date: "2025-12-20",
-  event_type: "partial_exit",
-  shares_sold: 80,
-  price_per_share: 72950.0,
-  gross_amount: 5_836_000,
-  net_amount: 5_600_000,
-  currency: "INR",
-  fx_rate: 1,
-  notes: "Secondary sale of 80 shares to incoming Series B lead.",
-  created_at: "2025-12-20T00:00:00Z",
-});
-
-// -----------------------------------------------------------------
 // Export assembled dataset
 // -----------------------------------------------------------------
 

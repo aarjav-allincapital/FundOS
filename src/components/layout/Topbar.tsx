@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/Badge";
+import { UserMenu } from "@/components/layout/UserMenu";
 
 export interface SearchItem {
   id: string;
@@ -150,9 +151,14 @@ export function Topbar({
         </div>
         <div className="h-6 w-px bg-line" />
         <div className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-gain" />
+          <span className="relative flex h-2 w-2" aria-hidden>
+            <span className="absolute inline-flex h-full w-full animate-live-ping rounded-full bg-gain" />
+            <span className="relative inline-flex h-2 w-2 animate-live-soft rounded-full bg-gain shadow-[0_0_6px_rgba(15,123,77,0.55)]" />
+          </span>
           <span className="text-2xs text-ink-muted">Live</span>
         </div>
+        <div className="h-6 w-px bg-line" />
+        <UserMenu />
       </div>
     </header>
   );

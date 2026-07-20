@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useFundOS } from "@/providers/FundOSProvider";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DropZone } from "@/components/ingest/DropZone";
-import { GoogleDrivePicker } from "@/components/ingest/GoogleDrivePicker";
 import { ReviewTable } from "@/components/ingest/ReviewTable";
 import { ingestFile } from "@/lib/ingest/ingest-file";
 import { existingCompanyId, founderAlreadyExists } from "@/lib/ingest/commit";
@@ -119,7 +118,6 @@ export default function IngestPage() {
 
       <div className="flex flex-col gap-4">
         <DropZone onFiles={handleFiles} busy={busy} />
-        <GoogleDrivePicker onFiles={handleFiles} busy={busy} />
 
         {error && (
           <p className="rounded border border-loss/30 bg-loss/5 px-3 py-2 text-2xs text-loss">

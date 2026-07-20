@@ -3,7 +3,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FundOSData } from "@/lib/types";
 import { createBootstrapData } from "@/lib/data/bootstrap";
-import { loadFundOSData, saveFundOSData } from "@/lib/data/storage";
+import {
+  STORAGE_KEY,
+  getLocalUpdatedAt,
+  loadFundOSData,
+  saveFundOSData,
+  setLocalUpdatedAt,
+  touchLocalUpdatedAt,
+} from "@/lib/data/storage";
+import {
+  createDebouncedRemoteSaver,
+  loadRemoteState,
+} from "@/lib/data/remote-state";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
   addCompany as mutateCompany,
   addDeal as mutateDeal,
@@ -85,31 +97,186 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
   const dataRef = useRef(data);
   const [isLoading, setIsLoading] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
+  const canPersistRemote = useRef(false);
+  // Last server timestamp we've seen (ms); used to detect teammate changes.
+  const remoteTsRef = useRef<number>(0);
+  // True while we have a local edit that hasn't been confirmed saved to the DB,
+  // so background syncs won't clobber an in-flight change.
+  const dirtyRef = useRef(false);
+
+  const remoteSaver = useRef(
+    createDebouncedRemoteSaver((result) => {
+      if (result.ok) {
+        if (result.updatedAt != null) {
+          remoteTsRef.current = result.updatedAt;
+          setLocalUpdatedAt(result.updatedAt);
+        }
+        dirtyRef.current = false;
+      }
+    }),
+  );
 
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
-  useEffect(() => {
-    const loaded = loadFundOSData();
-    setData(loaded);
-    setIsLoading(false);
-    setIsHydrated(true);
-    refreshDisplayFxRates(loaded).then((next) => {
-      if (next !== loaded) {
-        setData(next);
-        saveFundOSData(next);
-      }
-    });
+  /** Persist locally always; mirror to Supabase (debounced) once hydrated. */
+  const persist = useCallback((next: FundOSData) => {
+    saveFundOSData(next);
+    touchLocalUpdatedAt();
+    if (canPersistRemote.current) {
+      dirtyRef.current = true;
+      remoteSaver.current.schedule(next);
+    }
   }, []);
 
-  const commit = useCallback((updater: (prev: FundOSData) => FundOSData) => {
-    setData((prev) => {
-      const next = updater(prev);
-      saveFundOSData(next);
-      return next;
-    });
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrate() {
+      setIsLoading(true);
+      const local = loadFundOSData();
+
+      // The Supabase snapshot is the single source of truth for the whole org.
+      // When it exists we adopt it unconditionally so every browser shows the
+      // same data — this is what stops a stale local cache (e.g. old seed data)
+      // from lingering in one browser. Local is only a fallback when the DB is
+      // empty or unreachable (offline).
+      let chosen = local;
+      let remoteExists = false;
+
+      if (isSupabaseConfigured()) {
+        try {
+          const remote = await loadRemoteState();
+          if (remote?.data) {
+            remoteExists = true;
+            chosen = remote.data;
+            remoteTsRef.current = remote.updatedAt ?? Date.now();
+          }
+        } catch (err) {
+          console.warn("[FundOS] Supabase load failed, using local cache:", err);
+        }
+      }
+
+      if (cancelled) return;
+
+      setData(chosen);
+      saveFundOSData(chosen);
+      setLocalUpdatedAt(remoteExists ? remoteTsRef.current : getLocalUpdatedAt() ?? 0);
+      canPersistRemote.current = true;
+
+      // Seed the DB only when it was empty; adopting an existing remote must
+      // NOT trigger a write-back (that would just echo the same data).
+      if (isSupabaseConfigured() && !remoteExists) {
+        dirtyRef.current = true;
+        remoteSaver.current.schedule(chosen);
+      }
+
+      setIsLoading(false);
+      setIsHydrated(true);
+
+      refreshDisplayFxRates(chosen).then((next) => {
+        if (cancelled || next === chosen) return;
+        setData(next);
+        persist(next);
+      });
+    }
+
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [persist]);
+
+  // Cross-tab sync: when another tab writes the snapshot, adopt it in memory
+  // without re-persisting (the originating tab already handled remote save).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      try {
+        const next = JSON.parse(e.newValue) as FundOSData;
+        setData(next);
+      } catch {
+        /* ignore malformed cross-tab payloads */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  /**
+   * Pull the shared snapshot and adopt it when the server has a different
+   * version than we last saw (a teammate saved). Skipped while we have an
+   * unsaved local edit in flight, so we never clobber the user's own change.
+   */
+  const syncFromRemote = useCallback(async () => {
+    if (!isSupabaseConfigured() || dirtyRef.current) return;
+    try {
+      const remote = await loadRemoteState();
+      if (!remote?.data || remote.updatedAt == null) return;
+      if (remote.updatedAt !== remoteTsRef.current) {
+        remoteTsRef.current = remote.updatedAt;
+        const next = remote.data;
+        setData(next);
+        saveFundOSData(next);
+        setLocalUpdatedAt(remote.updatedAt);
+      }
+    } catch {
+      /* transient — the next focus/poll will retry */
+    }
+  }, []);
+
+  // Live-feeling sync WITHOUT Supabase Realtime (no persistent connection, so
+  // it's cheaper on Supabase). We refetch the shared snapshot on the moments a
+  // user would actually notice staleness — tab focus / becoming visible — plus
+  // a slow background interval as a safety net. Adoption is newer-wins only.
+  useEffect(() => {
+    if (!isHydrated || !isSupabaseConfigured()) return;
+
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void syncFromRemote();
+    };
+
+    // Refetch immediately on mount so a freshly opened tab is current.
+    void syncFromRemote();
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const poll = setInterval(() => {
+      if (document.visibilityState === "visible") void syncFromRemote();
+    }, 20_000);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      clearInterval(poll);
+    };
+  }, [isHydrated, syncFromRemote]);
+
+  // Flush any pending debounced save before the tab is hidden/closed so the
+  // very last edit always reaches Supabase.
+  useEffect(() => {
+    const saver = remoteSaver.current;
+    const flush = () => saver.flushNow();
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      saver.flushNow();
+    };
+  }, []);
+
+  const commit = useCallback(
+    (updater: (prev: FundOSData) => FundOSData) => {
+      setData((prev) => {
+        const next = updater(prev);
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
 
   const refreshDisplayFx = useCallback(async () => {
     const snapshot = dataRef.current;
@@ -224,11 +391,11 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       refreshDisplayFx,
       resetData: () => {
         const bootstrap = createBootstrapData();
-        saveFundOSData(bootstrap);
+        persist(bootstrap);
         setData(bootstrap);
       },
     }),
-    [data, isLoading, isHydrated, commit, refreshDisplayFx]
+    [data, isLoading, isHydrated, commit, refreshDisplayFx, persist]
   );
 
   return (

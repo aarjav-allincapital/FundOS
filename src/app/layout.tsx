@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { FundOSProvider } from "@/providers/FundOSProvider";
 import { DisplayPreferencesProvider } from "@/providers/DisplayPreferencesProvider";
+import { AuthProvider } from "@/providers/AuthProvider";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -24,9 +25,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={jakarta.variable}>
       <body className={`${jakarta.className} font-sans antialiased`}>
-        <FundOSProvider>
-          <DisplayPreferencesProvider>{children}</DisplayPreferencesProvider>
-        </FundOSProvider>
+        <AuthProvider>
+          <FundOSProvider>
+            <DisplayPreferencesProvider>{children}</DisplayPreferencesProvider>
+          </FundOSProvider>
+        </AuthProvider>
       </body>
     </html>
   );

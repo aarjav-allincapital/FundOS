@@ -1,7 +1,8 @@
 import type { DealStage, FundOSData } from "@/lib/types";
 import { createBootstrapData } from "@/lib/data/bootstrap";
 
-const STORAGE_KEY = "fundos_data_v1";
+export const STORAGE_KEY = "fundos_data_v1";
+const UPDATED_AT_KEY = "fundos_data_v1_updated_at";
 
 const LEGACY_STAGE_MAP: Record<string, DealStage> = {  early_evaluation: "first_call",
   deep_dive: "second_call",
@@ -79,6 +80,31 @@ export function loadFundOSData(): FundOSData {
 export function saveFundOSData(data: FundOSData): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+/**
+ * Local "last edited" clock (epoch ms), used to resolve local-vs-remote on load.
+ * Kept separate from saveFundOSData so internal migration re-saves don't bump it
+ * (which would make the local cache always appear newer than the DB).
+ */
+export function getLocalUpdatedAt(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(UPDATED_AT_KEY);
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function setLocalUpdatedAt(ts: number): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(UPDATED_AT_KEY, String(ts));
+}
+
+/** Stamp the local cache as freshly edited (call on every real mutation). */
+export function touchLocalUpdatedAt(): number {
+  const ts = Date.now();
+  setLocalUpdatedAt(ts);
+  return ts;
 }
 
 export function resetFundOSData(): FundOSData {

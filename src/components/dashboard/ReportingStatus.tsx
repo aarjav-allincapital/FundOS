@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type { FundOSData } from "@/lib/types";
 import {
   allFundMetrics,
@@ -6,12 +9,14 @@ import {
   formatMoney,
   formatPercent,
 } from "@/lib/calc";
+import { downloadLpExcel, openLpUpdatePdf } from "@/lib/reporting/lp-export";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
 import { FileDown, FileSpreadsheet, Mail } from "lucide-react";
 
 export function ReportingStatus({ data }: { data: FundOSData }) {
   const funds = allFundMetrics(data);
+  const [exportError, setExportError] = useState<string | null>(null);
   const approvedMarks = data.valuationMarks.filter(
     (m) => m.approval_status === "approved"
   ).length;
@@ -29,11 +34,20 @@ export function ReportingStatus({ data }: { data: FundOSData }) {
     return { fund: f, lastNav: dates[dates.length - 1] ?? null };
   });
 
+  function runExport(fn: () => void) {
+    setExportError(null);
+    try {
+      fn();
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Export failed.");
+    }
+  }
+
   return (
     <Panel className="h-full">
       <PanelHeader
         title="Reporting Status"
-        subtitle="NAV readiness & exports"
+        subtitle="NAV readiness & LP exports"
         action={
           <Badge tone={pendingMarks ? "warn" : "gain"}>
             {pendingMarks ? `${pendingMarks} pending` : "All approved"}
@@ -70,10 +84,26 @@ export function ReportingStatus({ data }: { data: FundOSData }) {
         </div>
       </div>
 
+      {exportError && (
+        <p className="border-t border-line px-4 py-2 text-2xs text-loss">{exportError}</p>
+      )}
+
       <div className="grid grid-cols-3 gap-2 border-t border-line p-3">
-        <ExportButton icon={<FileDown className="h-3.5 w-3.5" />} label="PDF" />
-        <ExportButton icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Excel" />
-        <ExportButton icon={<Mail className="h-3.5 w-3.5" />} label="LP Update" />
+        <ExportButton
+          icon={<FileDown className="h-3.5 w-3.5" />}
+          label="PDF"
+          onClick={() => runExport(() => openLpUpdatePdf(data))}
+        />
+        <ExportButton
+          icon={<FileSpreadsheet className="h-3.5 w-3.5" />}
+          label="Excel"
+          onClick={() => runExport(() => downloadLpExcel(data))}
+        />
+        <ExportButton
+          icon={<Mail className="h-3.5 w-3.5" />}
+          label="LP Update"
+          onClick={() => runExport(() => openLpUpdatePdf(data))}
+        />
       </div>
     </Panel>
   );
@@ -88,9 +118,21 @@ function IrrStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ExportButton({ icon, label }: { icon: React.ReactNode; label: string }) {
+function ExportButton({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
   return (
-    <button className="flex items-center justify-center gap-1.5 rounded border border-line bg-surface px-2 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:border-line-strong hover:text-ink">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center justify-center gap-1.5 rounded border border-line bg-surface px-2 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
+    >
       {icon}
       {label}
     </button>
