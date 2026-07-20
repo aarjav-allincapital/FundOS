@@ -11,12 +11,13 @@ import {
 } from "@/lib/ingest/schema";
 import { extractText, TEXT_UNSUPPORTED } from "@/lib/ingest/extract-text";
 import { emptyEntities, type ExtractedEntities } from "@/lib/ingest/types";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 // Node runtime — the SDK, mammoth, and unpdf need Node, not the edge runtime.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Gemini OCR on multi-page PDFs can exceed the default 10s Vercel limit. */
-export const maxDuration = 60;
+/** Gemini OCR on large multi-page scans is slow; take the max the plan allows. */
+export const maxDuration = 300;
 
 function env(key: string): string | undefined {
   const v = process.env[key];
@@ -24,9 +25,40 @@ function env(key: string): string | undefined {
 }
 
 interface ExtractRequest {
+  /** Inline base64 for small files (< ~3MB) sent directly in the request body. */
   fileBase64?: string;
+  /** Storage object path for large files (up to bucket cap), downloaded server-side. */
+  storagePath?: string;
   mediaType?: string;
   filename?: string;
+}
+
+const INGEST_BUCKET = "ingest-uploads";
+
+/** Pull a large upload out of Supabase Storage and return it as base64. */
+async function loadFromStorage(storagePath: string): Promise<string> {
+  const admin = getSupabaseAdminClient();
+  if (!admin) {
+    throw new HttpError("Storage is not configured on the server.", 503);
+  }
+  const { data, error } = await admin.storage
+    .from(INGEST_BUCKET)
+    .download(storagePath);
+  if (error || !data) {
+    throw new HttpError(
+      `Could not read the uploaded file: ${error?.message ?? "not found"}.`,
+      400,
+    );
+  }
+  const buffer = Buffer.from(await data.arrayBuffer());
+  return buffer.toString("base64");
+}
+
+/** Best-effort cleanup of a transient upload. */
+async function removeFromStorage(storagePath: string): Promise<void> {
+  const admin = getSupabaseAdminClient();
+  if (!admin) return;
+  await admin.storage.from(INGEST_BUCKET).remove([storagePath]).catch(() => {});
 }
 
 const NO_CREDS =
@@ -75,9 +107,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { fileBase64, mediaType, filename } = body;
-  if (!fileBase64 || !mediaType) {
-    return NextResponse.json({ error: "fileBase64 and mediaType are required" }, { status: 400 });
+  const { storagePath, mediaType, filename } = body;
+  if (!mediaType) {
+    return NextResponse.json({ error: "mediaType is required" }, { status: 400 });
+  }
+  if (!body.fileBase64 && !storagePath) {
+    return NextResponse.json({ error: "fileBase64 or storagePath is required" }, { status: 400 });
   }
 
   const isDocx = mediaType === DOCX_MEDIA_TYPE;
@@ -92,6 +127,27 @@ export async function POST(request: Request) {
   // Provider precedence: OpenRouter (one key → Gemini & other vision models,
   // no Google project) → Gemini → DeepSeek (text only) → Anthropic. First wins.
   try {
+    // Large files arrive via Storage; small ones inline. Resolve to base64 once.
+    const fileBase64 = storagePath ? await loadFromStorage(storagePath) : body.fileBase64!;
+    const cleanup = () => (storagePath ? removeFromStorage(storagePath) : Promise.resolve());
+    try {
+      return await runExtraction(fileBase64, mediaType, filename);
+    } finally {
+      await cleanup();
+    }
+  } catch (e) {
+    if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
+    if (e instanceof Anthropic.AuthenticationError) return NextResponse.json({ error: NO_CREDS }, { status: 400 });
+    const detail = e instanceof Anthropic.APIError ? `${e.status} ${e.message}` : "extraction failed";
+    return NextResponse.json({ error: `Extraction error: ${detail}` }, { status: 502 });
+  }
+}
+
+async function runExtraction(
+  fileBase64: string,
+  mediaType: string,
+  filename?: string,
+): Promise<NextResponse> {
     if (env("OPENROUTER_API_KEY")) {
       const entities = await extractWithOpenRouter(fileBase64, mediaType, filename);
       return NextResponse.json({ entities });
@@ -110,12 +166,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ entities });
     }
     return NextResponse.json({ error: NO_CREDS }, { status: 400 });
-  } catch (e) {
-    if (e instanceof HttpError) return NextResponse.json({ error: e.message }, { status: e.status });
-    if (e instanceof Anthropic.AuthenticationError) return NextResponse.json({ error: NO_CREDS }, { status: 400 });
-    const detail = e instanceof Anthropic.APIError ? `${e.status} ${e.message}` : "extraction failed";
-    return NextResponse.json({ error: `Extraction error: ${detail}` }, { status: 502 });
-  }
 }
 
 class HttpError extends Error {
