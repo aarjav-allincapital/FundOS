@@ -103,6 +103,8 @@ export interface CompanyRollup {
   unrealizedByCurrency: Record<string, number>;
   blendedMoic: number;
   latestMarkDate: string | null;
+  /** Earliest investment_date across lots for this company. */
+  firstInvestedDate: string | null;
   status: string;
 }
 
@@ -136,6 +138,12 @@ export function companyRollup(data: FundOSData, company: Company): CompanyRollup
       .sort()
       .reverse()[0] ?? null;
 
+  const firstInvestedDate =
+    lots
+      .map((l) => l.lot.investment_date)
+      .filter(Boolean)
+      .sort()[0] ?? null;
+
   return {
     company,
     lots,
@@ -147,6 +155,7 @@ export function companyRollup(data: FundOSData, company: Company): CompanyRollup
     unrealizedByCurrency,
     blendedMoic,
     latestMarkDate,
+    firstInvestedDate,
     status: company.status,
   };
 }

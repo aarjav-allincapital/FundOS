@@ -1,5 +1,11 @@
 import type { FundOSData } from "@/lib/types";
-import { allLotPositions, formatMoney, formatPercent, type LotPosition } from "@/lib/calc";
+import {
+  allLotPositions,
+  formatMoney,
+  formatPercent,
+  formatDate,
+  type LotPosition,
+} from "@/lib/calc";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { cn } from "@/lib/cn";
 
@@ -45,11 +51,16 @@ function MoverList({
           const width = Math.min(100, (Math.abs(pct) / maxAbs) * 100);
           return (
             <div key={p.lot.id} className="flex items-center gap-3">
-              <div className="w-28 shrink-0">
+              <div className="w-32 shrink-0">
                 <div className="truncate text-[13px] font-medium text-ink">
                   {p.company.brand_name ?? p.company.legal_name}
                 </div>
-                <div className="text-2xs text-ink-faint">{p.fund.vehicle_code}</div>
+                <div className="text-2xs text-ink-faint">
+                  {p.fund.vehicle_code}
+                  {p.lot.investment_date
+                    ? ` · ${formatDate(p.lot.investment_date, "short")}`
+                    : ""}
+                </div>
               </div>
               <div className="relative h-4 flex-1 rounded-sm bg-surface-sunken">
                 <div

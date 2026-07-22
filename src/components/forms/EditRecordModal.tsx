@@ -692,11 +692,15 @@ function LotEditForm({
           cash_invested_local: calcCashInvestedLocal(sharesNum, ppsNum),
           fx_rate_at_entry: Number(fd.get("fx")),
           currency,
+          investment_date: String(fd.get("investment_date")),
         });
       }}
     >
       <Field label="Lot Code">
         <input readOnly value={lot.code} className={`${inputClass} bg-surface-subtle`} />
+      </Field>
+      <Field label="Investment Date *">
+        <DateInput name="investment_date" required defaultValue={lot.investment_date} />
       </Field>
       <Field label="Fund *">
         <select

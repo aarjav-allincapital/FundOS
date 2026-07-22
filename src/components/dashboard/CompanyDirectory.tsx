@@ -1,7 +1,7 @@
 "use client";
 
 import type { FundOSData } from "@/lib/types";
-import { companyRollup, formatMoney, formatMultiple, formatDate } from "@/lib/calc";
+import { companyRollup, formatMoney, formatMultiple } from "@/lib/calc";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { RecordActions } from "@/components/forms/RecordActions";
@@ -68,9 +68,6 @@ export function CompanyDirectory({ data }: { data: FundOSData }) {
                     {formatMultiple(r.blendedMoic)}
                   </div>
                 </div>
-              </div>
-              <div className="text-2xs text-ink-faint">
-                Last mark {formatDate(r.latestMarkDate, "medium")}
               </div>
             </div>
           );

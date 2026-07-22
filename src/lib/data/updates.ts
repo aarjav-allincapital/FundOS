@@ -172,6 +172,7 @@ export interface UpdateLotInput {
   cash_invested_local?: number;
   fx_rate_at_entry?: number;
   currency?: string;
+  investment_date?: string;
 }
 
 export function updateInvestmentLot(
@@ -211,6 +212,7 @@ export function updateInvestmentLot(
     cash_invested_fund: cashFund,
     fx_rate_at_entry: fx,
     currency,
+    investment_date: input.investment_date ?? lot.investment_date,
   });
 
   let rounds = data.rounds;
@@ -262,12 +264,14 @@ export function updateInvestmentLot(
   // Rebuild all snapshots for this lot so cost basis / entry FX stay consistent.
   const lotSnaps = working.positionSnapshots.filter((s) => s.lot_id === lot.id);
   const rebuilt = lotSnaps.map((existing) => {
-    const isEntry =
-      existing.snapshot_date === updatedLot.investment_date ||
+    const wasEntry =
+      existing.snapshot_date === lot.investment_date ||
       existing.notes === "Entry basis";
+    const snapDate = wasEntry ? updatedLot.investment_date : existing.snapshot_date;
+    const isEntry = wasEntry || existing.snapshot_date === updatedLot.investment_date;
     const snap = buildSnapshot({
       lot: updatedLot,
-      snapshot_date: existing.snapshot_date,
+      snapshot_date: snapDate,
       mark_price_per_share_local: isEntry
         ? updatedLot.price_per_share_local
         : existing.mark_price_per_share_local,

@@ -54,6 +54,7 @@ function positionsSheet(data: FundOSData) {
       Fund: p.fund.code,
       Company: p.company.brand_name || p.company.legal_name,
       "Lot code": p.lot.code,
+      "Invested": p.lot.investment_date ?? "",
       Round: p.round?.round_name ?? "",
       Vehicle: p.lot.vehicle,
       Status: p.lot.status,

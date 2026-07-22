@@ -7,6 +7,7 @@ import {
   formatMoney,
   formatMultiple,
   formatNumber,
+  formatDate,
   humanize,
 } from "@/lib/calc";
 import { useFundOS } from "@/providers/FundOSProvider";
@@ -18,7 +19,11 @@ import { Delta } from "@/components/ui/Delta";
 
 export function InvestmentLots({ data }: { data: FundOSData }) {
   const { mergeLots } = useFundOS();
-  const positions = allLotPositions(data).sort((a, b) => b.fmvFund - a.fmvFund);
+  const positions = allLotPositions(data).sort((a, b) => {
+    // Newest investments first when FMV ties; otherwise rank by current value.
+    if (b.fmvFund !== a.fmvFund) return b.fmvFund - a.fmvFund;
+    return (b.lot.investment_date || "").localeCompare(a.lot.investment_date || "");
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const chosen = positions.filter((p) => selected.has(p.lot.id));
@@ -84,6 +89,7 @@ export function InvestmentLots({ data }: { data: FundOSData }) {
       <Table>
         <THead>
           <TH className="w-8" />
+          <TH>Date</TH>
           <TH>Lot Code</TH>
           <TH>Company</TH>
           <TH>Round</TH>
@@ -106,6 +112,15 @@ export function InvestmentLots({ data }: { data: FundOSData }) {
                   onChange={() => toggle(p.lot.id)}
                   title="Select to merge"
                 />
+              </TD>
+              <TD num muted>
+                <div className="tnum">{formatDate(p.lot.investment_date, "medium")}</div>
+                {p.latest?.snapshot_date &&
+                  p.latest.snapshot_date !== p.lot.investment_date && (
+                    <div className="text-[10px] text-ink-faint">
+                      Mark {formatDate(p.latest.snapshot_date, "short")}
+                    </div>
+                  )}
               </TD>
               <TD strong className="font-mono text-2xs">{p.lot.code}</TD>
               <TD>{p.company.brand_name ?? p.company.legal_name}</TD>

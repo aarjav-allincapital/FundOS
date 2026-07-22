@@ -183,6 +183,7 @@ function positionsHtml(data: FundOSData, fundId: string | "all", limit = 8): str
         <td style="padding:8px 8px 8px 0;border-bottom:1px solid ${BRAND.line};font-size:13px;color:${BRAND.ink};">
           ${logoCell(p.company.logo_url, p.company.updated_at ?? null, name)}${esc(name)}
         </td>
+        <td style="padding:8px;border-bottom:1px solid ${BRAND.line};font-size:12px;color:${BRAND.muted};">${esc(formatDate(p.lot.investment_date, "medium"))}</td>
         <td style="padding:8px;border-bottom:1px solid ${BRAND.line};font-size:12px;color:${BRAND.muted};">${esc(p.fund.code)}</td>
         <td style="padding:8px;border-bottom:1px solid ${BRAND.line};font-size:13px;color:${BRAND.ink};text-align:right;font-variant-numeric:tabular-nums;">${formatMoney(p.fmvFund, p.fund.currency, { compact: true })}</td>
         <td style="padding:8px 0 8px 8px;border-bottom:1px solid ${BRAND.line};font-size:13px;color:${BRAND.ink};text-align:right;font-variant-numeric:tabular-nums;">${formatMultiple(p.moic)}</td>
@@ -196,7 +197,7 @@ function positionsHtml(data: FundOSData, fundId: string | "all", limit = 8): str
   return (
     sectionTitle("Top holdings") +
     `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
-      <thead><tr>${th("Company")}${th("Fund")}${th("FMV", "right")}${th("MOIC", "right")}</tr></thead>
+      <thead><tr>${th("Company")}${th("Invested")}${th("Fund")}${th("FMV", "right")}${th("MOIC", "right")}</tr></thead>
       <tbody>${rows}</tbody>
     </table>`
   );
@@ -382,7 +383,7 @@ export function buildLpReportText(data: FundOSData, opts: LpReportOptions): stri
       lines.push("TOP HOLDINGS");
       for (const p of positions) {
         const name = p.company.brand_name || p.company.legal_name;
-        lines.push(`- ${name}: ${formatMoney(p.fmvFund, p.fund.currency)} FMV (${formatMultiple(p.moic)})`);
+        lines.push(`- ${name} (${formatDate(p.lot.investment_date, "medium")}): ${formatMoney(p.fmvFund, p.fund.currency)} FMV (${formatMultiple(p.moic)})`);
       }
       lines.push("");
     }

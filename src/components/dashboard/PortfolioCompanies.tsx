@@ -16,7 +16,7 @@ import { Badge, statusTone } from "@/components/ui/Badge";
 import { Delta } from "@/components/ui/Delta";
 import { cn } from "@/lib/cn";
 
-type SortKey = "name" | "fmv" | "moic" | "unrealized" | "mark";
+type SortKey = "name" | "fmv" | "moic" | "unrealized" | "mark" | "invested";
 
 export function PortfolioCompanies({ data }: { data: FundOSData }) {
   const rollups = useMemo(() => allCompanyRollups(data), [data]);
@@ -81,6 +81,7 @@ export function PortfolioCompanies({ data }: { data: FundOSData }) {
           <SortableTH label="FMV" num active={sort === "fmv"} dir={dir} onClick={() => toggleSort("fmv")} />
           <SortableTH label="Unrealized" num active={sort === "unrealized"} dir={dir} onClick={() => toggleSort("unrealized")} />
           <SortableTH label="MOIC" num active={sort === "moic"} dir={dir} onClick={() => toggleSort("moic")} />
+          <SortableTH label="Invested" num active={sort === "invested"} dir={dir} onClick={() => toggleSort("invested")} />
           <SortableTH label="Last Mark" num active={sort === "mark"} dir={dir} onClick={() => toggleSort("mark")} />
           <TH>Status</TH>
         </THead>
@@ -117,6 +118,7 @@ export function PortfolioCompanies({ data }: { data: FundOSData }) {
                   </div>
                 </TD>
                 <TD num strong>{formatMultiple(r.blendedMoic)}</TD>
+                <TD num muted>{formatDate(r.firstInvestedDate, "medium")}</TD>
                 <TD num muted>{formatDate(r.latestMarkDate, "medium")}</TD>
                 <TD>
                   <Badge tone={statusTone(r.status)}>{r.status.replace("_", " ")}</Badge>
@@ -141,6 +143,8 @@ function sortValue(r: CompanyRollup, key: SortKey): number | string {
       return r.unrealizedByCurrency[ccy] ?? 0;
     case "moic":
       return r.blendedMoic;
+    case "invested":
+      return r.firstInvestedDate ?? "";
     case "mark":
       return r.latestMarkDate ?? "";
   }
