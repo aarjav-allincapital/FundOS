@@ -189,7 +189,7 @@ async function extractWithOpenRouter(
   filename?: string
 ): Promise<ExtractedEntities> {
   const base = (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/$/, "");
-  const model = process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash";
+  const model = process.env.OPENROUTER_MODEL || "google/gemini-3.6-flash";
   // Scanned PDFs need OCR: "native" lets a vision model (Gemini) OCR them;
   // set OPENROUTER_PDF_ENGINE=mistral-ocr for a dedicated OCR engine instead.
   const pdfEngine = process.env.OPENROUTER_PDF_ENGINE || "native";
@@ -285,11 +285,22 @@ async function extractWithGemini(
   });
 
   const base = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
-  // "…-latest" alias tracks the current model so it doesn't go stale; bump to
-  // gemini-pro-latest / gemini-3-pro-preview for the hardest scans.
-  const model = env("GEMINI_MODEL") || "gemini-flash-latest";
+  // Prefer an explicit current model. gemini-2.5-flash is blocked for new API keys.
+  const model = env("GEMINI_MODEL") || "gemini-3.6-flash";
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new HttpError("GEMINI_API_KEY is not configured.", 400);
+
+  // Keep generationConfig conservative — unsupported fields (e.g. thinkingBudget
+  // on Pro / Gemini 3) come back as a vague "invalid argument" 400.
+  const generationConfig: Record<string, unknown> = {
+    temperature: 0,
+    responseMimeType: "application/json",
+    maxOutputTokens: 8192,
+  };
+  // Only pre-3 Flash models accept thinkingBudget: 0 (disable thinking).
+  if (/flash/i.test(model) && !/gemini-3/i.test(model)) {
+    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  }
 
   const res = await fetch(`${base}/models/${model}:generateContent`, {
     method: "POST",
@@ -300,27 +311,25 @@ async function extractWithGemini(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: `${EXTRACTION_SYSTEM}\n\n${EXTRACTION_JSON_INSTRUCTION}` }] },
       contents: [{ role: "user", parts }],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: "application/json",
-        // Big budget so long multi-page scans don't truncate the JSON, and no
-        // "thinking" (it isn't needed for extraction and would eat the budget).
-        maxOutputTokens: 65536,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
+      generationConfig,
     }),
   });
 
   if (!res.ok) {
     let msg = `${res.status}`;
     try {
-      const err = (await res.json()) as { error?: { message?: string } };
+      const err = (await res.json()) as { error?: { message?: string; status?: string } };
       msg = err.error?.message ?? msg;
     } catch {
       /* keep status */
     }
-    const hint = res.status === 400 || res.status === 403 ? " (check GEMINI_API_KEY)" : "";
-    throw new HttpError(`Gemini error: ${msg}${hint}`, res.status === 403 ? 400 : 502);
+    const keyHint =
+      /API key|permission|PERMISSION_DENIED|unauthenticated/i.test(msg)
+        ? " (check GEMINI_API_KEY at aistudio.google.com/apikey)"
+        : /no longer available|NOT_FOUND|invalid argument|INVALID_ARGUMENT/i.test(msg)
+          ? ` (try GEMINI_MODEL=gemini-3.6-flash; current=${model})`
+          : "";
+    throw new HttpError(`Gemini error: ${msg}${keyHint}`, res.status === 403 ? 400 : 502);
   }
 
   const data = (await res.json()) as {
