@@ -42,16 +42,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: invited.error }, { status: 400 });
   }
 
-  const origin =
-    request.headers.get("origin") ||
-    process.env.NEXT_PUBLIC_APP_URL ||
+  // Always send invitees to the production app — never localhost from a
+  // local Admin session (Origin would otherwise be http://localhost:3000).
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const originHeader = request.headers.get("origin")?.trim() ?? "";
+  const originLooksLocal =
+    /localhost|127\.0\.0\.1/i.test(originHeader) ||
+    originHeader.startsWith("http://192.") ||
+    originHeader.startsWith("http://10.");
+  const appUrl =
+    (envUrl && !/localhost|127\.0\.0\.1/i.test(envUrl) ? envUrl : null) ||
+    (!originLooksLocal && originHeader ? originHeader : null) ||
     "https://fundos-aic.vercel.app";
 
   const sent = await sendInviteEmail({
     to: email,
     invitedBy: auth.email,
     role: invited.user.role,
-    appUrl: origin,
+    appUrl,
   });
 
   if (!sent.ok) {
