@@ -82,3 +82,54 @@ export async function sendHtmlEmail(opts: {
   }
   return { ok: true, id: data?.id ?? null };
 }
+
+/** Invite a teammate to FundOS (OTP sign-in). */
+export async function sendInviteEmail(opts: {
+  to: string;
+  invitedBy: string;
+  role: "admin" | "org_user";
+  appUrl: string;
+}): Promise<{ ok: true; id: string | null } | { ok: false; error: string }> {
+  const roleLabel = opts.role === "admin" ? "Admin" : "Org user";
+  const loginUrl = `${opts.appUrl.replace(/\/$/, "")}/login`;
+  return sendHtmlEmail({
+    to: [opts.to],
+    subject: "You're invited to FundOS · All In Capital",
+    from:
+      process.env.RESEND_FROM_EMAIL?.trim() ||
+      "FundOS <auth@allincapital.vc>",
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#111827;">
+        <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:#9ca3af;">All In Capital · FundOS</p>
+        <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;">You're invited</h1>
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#374151;">
+          <strong>${escapeHtml(opts.invitedBy)}</strong> invited you to FundOS as
+          <strong>${roleLabel}</strong>.
+        </p>
+        <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#374151;">
+          Sign in with your <strong>@allincapital.vc</strong> email — we'll email you a one-time code.
+        </p>
+        <p style="margin:0 0 28px;">
+          <a href="${escapeHtml(loginUrl)}"
+             style="display:inline-block;background:#F0524B;color:#fff;text-decoration:none;font-weight:600;font-size:13px;padding:10px 16px;border-radius:8px;">
+            Open FundOS
+          </a>
+        </p>
+        <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.5;">
+          If you weren't expecting this, you can ignore this email.
+        </p>
+      </div>
+    `,
+    text:
+      `You're invited to FundOS by ${opts.invitedBy} as ${roleLabel}.\n` +
+      `Sign in at ${loginUrl} with your @allincapital.vc email.`,
+  });
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}

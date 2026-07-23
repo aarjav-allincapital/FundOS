@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShieldAlert, Download, History, RotateCcw } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
-import { isAdminEmail } from "@/lib/audit/admin";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { Panel, PanelHeader, PanelBody } from "@/components/ui/Panel";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/Table";
@@ -66,8 +65,8 @@ function countsDelta(before: Record<string, number> | null, after: Record<string
 }
 
 export default function LogsPage() {
-  const { email } = useAuth();
-  const allowed = isAdminEmail(email);
+  const { isAdmin } = useAuth();
+  const allowed = isAdmin;
 
   const [logs, setLogs] = useState<AuditRow[] | null>(null);
   const [backups, setBackups] = useState<BackupRow[] | null>(null);

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useFundOS } from "@/providers/FundOSProvider";
+import { useAuth } from "@/providers/AuthProvider";
 import { SelectOptions } from "@/components/ui/SelectOptions";
 import { CashInvestedField } from "@/components/forms/CashInvestedField";
 import { DateInput } from "@/components/forms/form-ui";
@@ -19,7 +20,7 @@ export type AddRecordMode =
   | "exit"
   | "deal";
 
-const MODES: { id: AddRecordMode; label: string }[] = [
+const ALL_MODES: { id: AddRecordMode; label: string }[] = [
   { id: "company", label: "Company" },
   { id: "founder", label: "Founder" },
   { id: "lot", label: "Investment Lot" },
@@ -37,17 +38,29 @@ export function AddRecordModal({
   onClose: () => void;
   defaultMode?: AddRecordMode;
 }) {
-  const [mode, setMode] = useState<AddRecordMode>(defaultMode);
+  const { can } = useAuth();
+  const modes = useMemo(
+    () =>
+      ALL_MODES.filter((m) => {
+        if (m.id === "lot" || m.id === "exit") return can("edit_lots");
+        if (m.id === "valuation") return can("edit_valuation_marks");
+        return true;
+      }),
+    [can],
+  );
+  const safeDefault =
+    modes.find((m) => m.id === defaultMode)?.id ?? modes[0]?.id ?? "company";
+  const [mode, setMode] = useState<AddRecordMode>(safeDefault);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ctx = useFundOS();
 
   useEffect(() => {
     if (open) {
-      setMode(defaultMode);
+      setMode(safeDefault);
       setError(null);
     }
-  }, [open, defaultMode]);
+  }, [open, safeDefault]);
 
   async function runAsync(action: () => Promise<void>) {
     setSaving(true);
@@ -77,7 +90,7 @@ export function AddRecordModal({
 
         <div className="border-b border-line px-3 py-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            {MODES.map((m) => (
+            {modes.map((m) => (
               <button
                 key={m.id}
                 type="button"
@@ -121,7 +134,7 @@ export function AddRecordModal({
               }}
             />
           )}
-          {mode === "lot" && (
+          {mode === "lot" && can("edit_lots") && (
             <LotForm
               funds={ctx.data.funds}
               companies={ctx.data.companies}
@@ -129,14 +142,14 @@ export function AddRecordModal({
               onSubmit={(v) => runAsync(() => ctx.addLot(v))}
             />
           )}
-          {mode === "valuation" && (
+          {mode === "valuation" && can("edit_valuation_marks") && (
             <ValuationForm
               companies={ctx.data.companies}
               saving={saving}
               onSubmit={(v) => runAsync(() => ctx.addValuationMark(v))}
             />
           )}
-          {mode === "exit" && (
+          {mode === "exit" && can("edit_lots") && (
             <ExitForm
               lots={ctx.data.investmentLots}
               companies={ctx.data.companies}
@@ -879,7 +892,16 @@ export function AddButton({
   mode?: AddRecordMode;
   label?: string;
 }) {
+  const { can } = useAuth();
   const [open, setOpen] = useState(false);
+
+  if (
+    ((mode === "lot" || mode === "exit") && !can("edit_lots")) ||
+    (mode === "valuation" && !can("edit_valuation_marks"))
+  ) {
+    return null;
+  }
+
   return (
     <>
       <button

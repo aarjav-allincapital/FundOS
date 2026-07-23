@@ -1,6 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { ADMIN_EMAILS } from "@/lib/audit/admin";
+import {
+  BOOTSTRAP_ADMIN_EMAILS,
+  resolveRole,
+  type AppRole,
+} from "@/lib/rbac/roles";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
@@ -12,6 +16,25 @@ const PUBLIC_PATHS = ["/login", "/auth", "/api/auth"];
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
+
+function isAdminOnlyPath(pathname: string): boolean {
+  return (
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/") ||
+    pathname === "/logs" ||
+    pathname.startsWith("/logs/") ||
+    pathname === "/ingest" ||
+    pathname.startsWith("/ingest/") ||
+    pathname === "/reporting" ||
+    pathname.startsWith("/reporting/") ||
+    pathname === "/api/admin" ||
+    pathname.startsWith("/api/admin/") ||
+    pathname === "/api/ingest" ||
+    pathname.startsWith("/api/ingest/") ||
+    pathname === "/api/reporting" ||
+    pathname.startsWith("/api/reporting/")
   );
 }
 
@@ -48,9 +71,6 @@ export async function middleware(request: NextRequest) {
   const isOrgUser = Boolean(email && email.endsWith(`@${ALLOWED_DOMAIN}`));
   const { pathname } = request.nextUrl;
 
-  // Redirect while carrying over any refreshed auth cookies from `response`,
-  // otherwise the rotated session token is dropped and the user is bounced
-  // back to /login on the next request (the "logged out again and again" loop).
   const redirectTo = (path: string, withRedirectParam = false) => {
     const url = request.nextUrl.clone();
     url.pathname = path;
@@ -65,12 +85,10 @@ export async function middleware(request: NextRequest) {
     return redirect;
   };
 
-  // Signed-in org user hitting /login → send to dashboard.
   if (isOrgUser && pathname === "/login") {
     return redirectTo("/");
   }
 
-  // Unauthenticated (or non-org) user on a protected page → send to /login.
   if (!isOrgUser && !isPublicPath(pathname)) {
     if (pathname.startsWith("/api/")) {
       const denied = NextResponse.json(
@@ -85,12 +103,17 @@ export async function middleware(request: NextRequest) {
     return redirectTo("/login", true);
   }
 
-  // Admin surfaces (audit log + backups) are restricted to a small allowlist,
-  // separate from the org-wide domain gate above.
-  const isAdmin = Boolean(email && ADMIN_EMAILS.includes(email));
-  const isAdminPath = pathname === "/logs" || pathname.startsWith("/logs/") ||
-    pathname === "/api/admin" || pathname.startsWith("/api/admin/");
-  if (isAdminPath && !isAdmin) {
+  const role: AppRole = resolveRole({
+    email,
+    appMetadataRole: user?.app_metadata?.role,
+    userMetadataRole: user?.user_metadata?.role,
+    dbRole: email && (BOOTSTRAP_ADMIN_EMAILS as readonly string[]).includes(email)
+      ? "admin"
+      : null,
+  });
+  const isAdmin = role === "admin";
+
+  if (isAdminOnlyPath(pathname) && !isAdmin) {
     if (pathname.startsWith("/api/")) {
       const denied = NextResponse.json(
         { error: "Admin access required." },
@@ -108,6 +131,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Run on everything except Next internals and static assets.
   matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

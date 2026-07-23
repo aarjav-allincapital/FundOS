@@ -29,6 +29,12 @@ export async function POST(request: Request) {
     );
   }
 
+  const { canSignInEmail } = await import("@/lib/rbac/users");
+  const allowed = await canSignInEmail(email);
+  if (!allowed.ok) {
+    return NextResponse.json({ ok: false, error: allowed.error }, { status: 403 });
+  }
+
   const admin = getSupabaseAdminClient();
   if (!admin) {
     return NextResponse.json(

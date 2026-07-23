@@ -24,6 +24,13 @@ export async function POST(request: Request) {
       { status: 403 },
     );
   }
+
+  const { canSignInEmail } = await import("@/lib/rbac/users");
+  const allowed = await canSignInEmail(email);
+  if (!allowed.ok) {
+    return NextResponse.json({ ok: false, error: allowed.error }, { status: 403 });
+  }
+
   if (!code || code.length !== 6) {
     return NextResponse.json(
       { ok: false, error: "Enter the 6-digit code from your email." },
@@ -87,6 +94,24 @@ export async function POST(request: Request) {
       { ok: false, error: createError.message },
       { status: 500 },
     );
+  }
+
+  // Ensure RBAC row + sync role into JWT app_metadata.
+  try {
+    const { ensureAppUser, syncAuthRoleMetadata } = await import("@/lib/rbac/users");
+    const row = await ensureAppUser(email, { status: "active" });
+    if (row) {
+      // Promote invited → active on first successful sign-in.
+      if (row.status === "invited") {
+        await admin
+          .from("app_users")
+          .update({ status: "active", updated_at: new Date().toISOString() })
+          .eq("email", email);
+      }
+      await syncAuthRoleMetadata(email, row.role);
+    }
+  } catch (e) {
+    console.error("[auth] rbac sync failed", e);
   }
 
   const { data: linkData, error: linkError } =

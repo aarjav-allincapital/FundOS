@@ -17,6 +17,7 @@ import {
   saveRemoteState,
 } from "@/lib/data/remote-state";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { useAuth } from "@/providers/AuthProvider";
 import {
   addCompany as mutateCompany,
   addDeal as mutateDeal,
@@ -104,6 +105,7 @@ function hasMeaningfulData(d: FundOSData): boolean {
 }
 
 export function FundOSProvider({ children }: { children: React.ReactNode }) {
+  const { can } = useAuth();
   const [data, setData] = useState<FundOSData>(createBootstrapData);
   const dataRef = useRef(data);
   const [isLoading, setIsLoading] = useState(true);
@@ -335,6 +337,9 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       addCompany: (input) => commit((prev) => mutateCompany(prev, input)),
       addFounder: (input) => commit((prev) => mutateFounder(prev, input)),
       addLot: async (input) => {
+        if (!can("edit_lots")) {
+          throw new Error("Only admins can add or change investment lots.");
+        }
         const snapshot = dataRef.current;
         const fx = await resolveTransactionFx(snapshot, input);
         commit((prev) =>
@@ -342,6 +347,9 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
         );
       },
       addValuationMark: async (input) => {
+        if (!can("edit_valuation_marks")) {
+          throw new Error("Only admins can add or change valuation marks.");
+        }
         const snapshot = dataRef.current;
         const company = snapshot.companies.find((c) => c.id === input.company_id);
         if (!company) return;
@@ -384,6 +392,9 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       addDeal: (input) => commit((prev) => mutateDeal(prev, input)),
       addFxRate: (input) => commit((prev) => mutateFxRate(prev, input)),
       exitLot: async (input) => {
+        if (!can("edit_lots")) {
+          throw new Error("Only admins can add or change investment lots.");
+        }
         const snapshot = dataRef.current;
         const lot = snapshot.investmentLots.find((l) => l.id === input.lot_id);
         if (!lot) return;
@@ -409,16 +420,33 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       updateCompany: (input) => commit((prev) => patchCompany(prev, input)),
       updateFounder: (input) => commit((prev) => patchFounder(prev, input)),
       updateFund: (input) => commit((prev) => patchFund(prev, input)),
-      updateLot: (input) => commit((prev) => patchLot(prev, input)),
-      mergeLots: (lotIds) => commit((prev) => mergeInvestmentLots(prev, lotIds)),
-      updateValuationMark: (input) =>
-        commit((prev) => patchValuationMark(prev, input)),
+      updateLot: (input) => {
+        if (!can("edit_lots")) {
+          throw new Error("Only admins can add or change investment lots.");
+        }
+        commit((prev) => patchLot(prev, input));
+      },
+      mergeLots: (lotIds) => {
+        if (!can("edit_lots")) {
+          throw new Error("Only admins can add or change investment lots.");
+        }
+        commit((prev) => mergeInvestmentLots(prev, lotIds));
+      },
+      updateValuationMark: (input) => {
+        if (!can("edit_valuation_marks")) {
+          throw new Error("Only admins can add or change valuation marks.");
+        }
+        commit((prev) => patchValuationMark(prev, input));
+      },
       updateSnapshot: (input) => commit((prev) => patchSnapshot(prev, input)),
       updateDeal: (input) => commit((prev) => patchDeal(prev, input)),
       updateFxRate: (input) => commit((prev) => patchFxRate(prev, input)),
       deleteRecord: (kind, id) =>
         commit((prev) => removeRecord(prev, kind, id)),
       commitDrafts: async (entities) => {
+        if (!can("ingest")) {
+          throw new Error("Only admins can commit ingest drafts.");
+        }
         // Reuse the same live-FX resolvers the manual add flows use, so
         // imported lots/marks get correct entry and reporting FX. Nothing here
         // writes FundOSData directly — applyEntities drives the mutation layer.
@@ -451,7 +479,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [data, isLoading, isHydrated, commit, refreshDisplayFx, persist]
+    [data, isLoading, isHydrated, commit, refreshDisplayFx, persist, can]
   );
 
   return (

@@ -11,6 +11,7 @@ import {
   FileText,
   UploadCloud,
   History,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,7 +41,13 @@ export const NAV: NavGroup[] = [
   {
     label: "Data",
     items: [
-      { id: "ingest", label: "Ingest", icon: UploadCloud, href: "/ingest" },
+      {
+        id: "ingest",
+        label: "Ingest",
+        icon: UploadCloud,
+        href: "/ingest",
+        adminOnly: true,
+      },
     ],
   },
   {
@@ -55,14 +62,26 @@ export const NAV: NavGroup[] = [
   {
     label: "Pipeline",
     items: [
-      { id: "pipeline", label: "Deployment & Terms", icon: GitBranch, href: "/pipeline" },
+      {
+        id: "pipeline",
+        label: "Deployment & Terms",
+        icon: GitBranch,
+        href: "/pipeline",
+      },
     ],
   },
   {
     label: "Operations",
     items: [
       { id: "fx", label: "FX Engine", icon: ArrowLeftRight, href: "/fx" },
-      { id: "reporting", label: "Reporting", icon: FileText, href: "/reporting" },
+      {
+        id: "reporting",
+        label: "Reporting",
+        icon: FileText,
+        href: "/reporting",
+        adminOnly: true,
+      },
+      { id: "admin", label: "Admin", icon: Shield, href: "/admin", adminOnly: true },
       { id: "logs", label: "Logs", icon: History, href: "/logs", adminOnly: true },
     ],
   },

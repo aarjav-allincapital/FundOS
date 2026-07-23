@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { isAllowedOrgEmail, isSupabaseConfigured } from "@/lib/supabase/config";
+import { assertAdmin } from "@/lib/rbac/users";
 import { sendHtmlEmail } from "@/lib/email/resend";
 
 export const runtime = "nodejs";
@@ -9,27 +8,11 @@ export const dynamic = "force-dynamic";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_RECIPIENTS = 50;
 
-/** Only a signed-in org member may send LP emails. Local mode allows it. */
-async function assertOrgUser(): Promise<
-  { ok: true; email: string | null } | { ok: false; status: number }
-> {
-  if (!isSupabaseConfigured()) return { ok: true, email: null };
-  const sb = await getSupabaseServerClient();
-  if (!sb) return { ok: true, email: null };
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user || !isAllowedOrgEmail(user.email)) {
-    return { ok: false, status: 401 };
-  }
-  return { ok: true, email: user.email ?? null };
-}
-
 export async function POST(request: Request) {
-  const auth = await assertOrgUser();
+  const auth = await assertAdmin();
   if (!auth.ok) {
     return NextResponse.json(
-      { ok: false, error: "Sign in with an All In Capital account to send." },
+      { ok: false, error: auth.error },
       { status: auth.status },
     );
   }

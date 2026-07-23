@@ -12,12 +12,10 @@ import {
   saveSidebarCollapsed,
 } from "@/lib/data/storage";
 import { useAuth } from "@/providers/AuthProvider";
-import { isAdminEmail } from "@/lib/audit/admin";
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { email } = useAuth();
-  const isAdmin = isAdminEmail(email);
+  const { isAdmin } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
