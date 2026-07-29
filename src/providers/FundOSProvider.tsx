@@ -82,7 +82,7 @@ interface FundOSContextValue {
   updateFund: (input: UpdateFundInput) => void;
   updateLot: (input: UpdateLotInput) => void;
   mergeLots: (lotIds: string[]) => void;
-  updateValuationMark: (input: UpdateValuationMarkInput) => void;
+  updateValuationMark: (input: UpdateValuationMarkInput) => Promise<void>;
   updateSnapshot: (input: UpdateSnapshotInput) => void;
   updateDeal: (input: UpdateDealInput) => void;
   updateFxRate: (input: UpdateFxRateInput) => void;
@@ -356,7 +356,9 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
 
         const fundCurrencies = snapshot.investmentLots
           .filter(
-            (l) => l.company_id === input.company_id && l.status === "active"
+            (l) =>
+              l.company_id === input.company_id &&
+              (l.status === "active" || l.status === "partial_exit")
           )
           .map((l) => snapshot.funds.find((f) => f.id === l.fund_id)!.currency);
 
@@ -432,11 +434,37 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
         }
         commit((prev) => mergeInvestmentLots(prev, lotIds));
       },
-      updateValuationMark: (input) => {
+      updateValuationMark: async (input) => {
         if (!can("edit_valuation_marks")) {
           throw new Error("Only admins can add or change valuation marks.");
         }
-        commit((prev) => patchValuationMark(prev, input));
+        const snapshot = dataRef.current;
+        const existing = snapshot.valuationMarks.find((m) => m.id === input.id);
+        if (!existing) return;
+        const company = snapshot.companies.find(
+          (c) => c.id === existing.company_id,
+        );
+        if (!company) return;
+
+        const valuationDate = input.valuation_date ?? existing.valuation_date;
+        const fundCurrencies = snapshot.investmentLots
+          .filter(
+            (l) =>
+              l.company_id === company.id &&
+              (l.status === "active" || l.status === "partial_exit"),
+          )
+          .map((l) => snapshot.funds.find((f) => f.id === l.fund_id)!.currency);
+
+        const reporting_fx = await resolveReportingFxMap(
+          snapshot,
+          company.operating_currency,
+          valuationDate,
+          fundCurrencies,
+        );
+
+        commit((prev) =>
+          patchValuationMark(prev, { ...input, reporting_fx }),
+        );
       },
       updateSnapshot: (input) => commit((prev) => patchSnapshot(prev, input)),
       updateDeal: (input) => commit((prev) => patchDeal(prev, input)),

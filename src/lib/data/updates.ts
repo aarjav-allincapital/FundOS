@@ -20,7 +20,9 @@ import type {
 } from "@/lib/types";
 import { buildSnapshot } from "@/lib/calc/snapshot";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
-import { storeManualFxRate, storeTransactionFxRate } from "@/lib/data/fx-store";
+import { resolveFxRate } from "@/lib/calc/fx";
+import { storeManualFxRate, storeReportingFxRate, storeTransactionFxRate } from "@/lib/data/fx-store";
+import { pairKey } from "@/lib/fx/prepare";
 
 function touchCompany(c: Company): Company {
   return { ...c, updated_at: new Date().toISOString() };
@@ -310,34 +312,186 @@ export interface UpdateValuationMarkInput {
   valuation_type?: ValuationType;
   price_per_share_local?: number;
   post_money_local?: number | null;
+  pre_money_local?: number | null;
   approval_status?: ApprovalStatus;
   notes?: string | null;
+  /** Pre-fetched reporting FX keyed by "FROM>TO" (company → fund). */
+  reporting_fx?: Record<string, number>;
 }
 
+/**
+ * Edit a valuation mark and rebuild every position snapshot tied to it, so
+ * correcting a wrong PPS / date / post-money actually updates NAV / MOIC.
+ */
 export function updateValuationMark(
   data: FundOSData,
   input: UpdateValuationMarkInput
 ): FundOSData {
-  return {
+  const existing = data.valuationMarks.find((m) => m.id === input.id);
+  if (!existing) return data;
+
+  const company = data.companies.find((c) => c.id === existing.company_id);
+  if (!company) return data;
+
+  const valuationDate = input.valuation_date ?? existing.valuation_date;
+  const price = input.price_per_share_local ?? existing.price_per_share_local;
+  const postMoney =
+    input.post_money_local !== undefined
+      ? input.post_money_local
+      : existing.post_money_local;
+  const preMoney =
+    input.pre_money_local !== undefined
+      ? input.pre_money_local
+      : existing.pre_money_local;
+  const approval = input.approval_status ?? existing.approval_status;
+  const valuationType = input.valuation_type ?? existing.valuation_type;
+  const notes = input.notes !== undefined ? input.notes : existing.notes;
+
+  const updatedMark: ValuationMark = {
+    ...existing,
+    valuation_date: valuationDate,
+    valuation_type: valuationType,
+    price_per_share_local: price,
+    post_money_local: postMoney,
+    pre_money_local: preMoney,
+    approval_status: approval,
+    notes,
+    event_code: company.abbr
+      ? `VE-${company.abbr}-${valuationDate}`
+      : existing.event_code,
+  };
+
+  let working: FundOSData = {
     ...data,
     valuationMarks: data.valuationMarks.map((m) =>
-      m.id === input.id
-        ? {
-            ...m,
-            valuation_date: input.valuation_date ?? m.valuation_date,
-            valuation_type: input.valuation_type ?? m.valuation_type,
-            price_per_share_local:
-              input.price_per_share_local ?? m.price_per_share_local,
-            post_money_local:
-              input.post_money_local !== undefined
-                ? input.post_money_local
-                : m.post_money_local,
-            approval_status: input.approval_status ?? m.approval_status,
-            notes: input.notes !== undefined ? input.notes : m.notes,
-          }
-        : m
+      m.id === input.id ? updatedMark : m,
     ),
   };
+
+  const liveLots = working.investmentLots.filter(
+    (l) =>
+      l.company_id === company.id &&
+      (l.status === "active" || l.status === "partial_exit"),
+  );
+
+  const linkedByLot = new Map(
+    working.positionSnapshots
+      .filter((s) => s.valuation_mark_id === input.id)
+      .map((s) => [s.lot_id, s]),
+  );
+
+  const rebuiltById = new Map<string, PositionSnapshot>();
+  const newSnaps: PositionSnapshot[] = [];
+
+  for (const lot of liveLots) {
+    const fund = working.funds.find((f) => f.id === lot.fund_id);
+    if (!fund) continue;
+
+    const key = pairKey(company.operating_currency, fund.currency);
+    const fx =
+      company.operating_currency === fund.currency
+        ? 1
+        : (input.reporting_fx?.[key] ??
+          resolveFxRate(
+            working.fxRates,
+            company.operating_currency,
+            fund.currency,
+            valuationDate,
+            { purposes: ["reporting", "manual"] },
+          ).rate);
+
+    if (
+      company.operating_currency !== fund.currency &&
+      input.reporting_fx?.[key]
+    ) {
+      working = storeReportingFxRate(
+        working,
+        company.operating_currency,
+        fund.currency,
+        fx,
+        valuationDate,
+      );
+    }
+
+    const existingSnap = linkedByLot.get(lot.id);
+    const snap = buildSnapshot({
+      lot,
+      snapshot_date: valuationDate,
+      mark_price_per_share_local: price,
+      fx_rate_at_mark: fx,
+      as_converted_shares:
+        existingSnap?.as_converted_shares || lot.shares_acquired || 0,
+      ownership_pct_at_event:
+        existingSnap?.ownership_pct_at_event ?? lot.ownership_at_entry_pct,
+      valuation_mark_id: updatedMark.id,
+      notes:
+        existingSnap?.notes?.startsWith("Mark @") || !existingSnap?.notes
+          ? `Mark @ ${valuationDate}`
+          : existingSnap.notes,
+      currency: company.operating_currency,
+    });
+
+    if (existingSnap) {
+      rebuiltById.set(existingSnap.id, {
+        ...snap,
+        id: existingSnap.id,
+        snapshot_code: existingSnap.snapshot_code,
+        created_at: existingSnap.created_at,
+      });
+    } else {
+      newSnaps.push(snap);
+    }
+  }
+
+  // Drop orphaned snapshots for this mark (lot exited fully / removed).
+  working = {
+    ...working,
+    positionSnapshots: [
+      ...working.positionSnapshots
+        .filter(
+          (s) =>
+            s.valuation_mark_id !== input.id || rebuiltById.has(s.id),
+        )
+        .map((s) => rebuiltById.get(s.id) ?? s),
+      ...newSnaps,
+    ],
+  };
+
+  // Refresh company mark cache from the latest approved mark.
+  const latestApproved = [...working.valuationMarks]
+    .filter(
+      (m) =>
+        m.company_id === company.id && m.approval_status === "approved",
+    )
+    .sort((a, b) => (a.valuation_date < b.valuation_date ? 1 : -1))[0];
+
+  working = {
+    ...working,
+    companies: working.companies.map((c) => {
+      if (c.id !== company.id) return c;
+      if (!latestApproved) {
+        return {
+          ...c,
+          latest_mark_price: null,
+          latest_mark_price_date: null,
+          last_approved_price_per_share: null,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return {
+        ...c,
+        latest_mark_price: latestApproved.price_per_share_local,
+        latest_mark_price_date: latestApproved.valuation_date,
+        last_approved_price_per_share: latestApproved.price_per_share_local,
+        last_approved_post_money_local:
+          latestApproved.post_money_local ?? c.last_approved_post_money_local,
+        last_priced_round_date: latestApproved.valuation_date,
+        updated_at: new Date().toISOString(),
+      };
+    }),
+  };
+
+  return working;
 }
 
 // ------------------------------------------------------------------

@@ -317,6 +317,7 @@ export function EditRecordModal({
           {mode === "valuation" && (() => {
             const m = data.valuationMarks.find((x) => x.id === recordId);
             if (!m) return <Missing />;
+            const company = data.companies.find((c) => c.id === m.company_id);
             return (
               <form
                 onSubmit={(e) => {
@@ -335,6 +336,12 @@ export function EditRecordModal({
                   );
                 }}
               >
+                {company && (
+                  <p className="mb-3 text-2xs text-ink-muted">
+                    {company.brand_name || company.legal_name} — saving also
+                    rebuilds linked position snapshots (FMV / MOIC).
+                  </p>
+                )}
                 <Field label="Valuation Date *">
                   <DateInput name="date" required defaultValue={m.valuation_date} />
                 </Field>

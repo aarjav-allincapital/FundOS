@@ -686,6 +686,10 @@ function ExitForm({
     "partial_exit" | "full_exit" | "write_off"
   >("full_exit");
   const selectedLot = openLots.find((l) => l.id === lotId);
+  const heldShares = selectedLot?.shares_acquired ?? undefined;
+  const [sharesSold, setSharesSold] = useState<string>(
+    heldShares != null ? String(heldShares) : ""
+  );
   const ccy = selectedLot?.currency ?? "INR";
   const isWriteOff = eventType === "write_off";
 
@@ -710,7 +714,14 @@ function ExitForm({
           required
           className={inputClass}
           value={lotId}
-          onChange={(e) => setLotId(e.target.value)}
+          onChange={(e) => {
+            const nextId = e.target.value;
+            setLotId(nextId);
+            const lot = openLots.find((l) => l.id === nextId);
+            setSharesSold(
+              lot?.shares_acquired != null ? String(lot.shares_acquired) : ""
+            );
+          }}
         >
           <option value="">Select…</option>
           {openLots.map((l) => {
@@ -744,23 +755,14 @@ function ExitForm({
       </Field>
       {!isWriteOff && (
         <>
-          <Field
-            label={`Shares Sold${
-              selectedLot?.shares_acquired
-                ? ` (held ${selectedLot.shares_acquired})`
-                : ""
-            } *`}
-          >
+          <Field label="Shares Sold *">
             <input
               name="shares"
               type="number"
               step="any"
               required
-              defaultValue={
-                eventType === "full_exit"
-                  ? selectedLot?.shares_acquired ?? undefined
-                  : undefined
-              }
+              value={sharesSold}
+              onChange={(e) => setSharesSold(e.target.value)}
               className={inputClass}
             />
           </Field>
