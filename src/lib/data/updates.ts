@@ -51,6 +51,7 @@ export interface UpdateCompanyInput {
   abbr?: string | null;
   status?: string;
   website?: string | null;
+  logo_url?: string | null;
 }
 
 export function updateCompany(
@@ -72,6 +73,7 @@ export function updateCompany(
             abbr: input.abbr !== undefined ? input.abbr : c.abbr,
             status: input.status ?? c.status,
             website: input.website !== undefined ? input.website : c.website,
+            logo_url: input.logo_url !== undefined ? input.logo_url : c.logo_url,
           })
         : c
     ),

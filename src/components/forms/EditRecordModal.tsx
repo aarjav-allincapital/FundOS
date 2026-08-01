@@ -6,7 +6,11 @@ import { useFundOS } from "@/providers/FundOSProvider";
 import { SelectOptions } from "@/components/ui/SelectOptions";
 import { Field, inputClass, Submit, DateInput } from "@/components/forms/form-ui";
 import { CashInvestedField } from "@/components/forms/CashInvestedField";
+import { FaviconPreview } from "@/components/forms/FaviconPreview";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
+import { faviconUrlFromWebsite } from "@/lib/company-logo";
+import { syncCompanyLogo } from "@/lib/company-logo-sync";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type {
   ApprovalStatus,
   DealSource,
@@ -96,62 +100,11 @@ export function EditRecordModal({
             const c = data.companies.find((x) => x.id === recordId);
             if (!c) return <Missing />;
             return (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  save(() =>
-                    ctx.updateCompany({
-                      id: c.id,
-                      legal_name: String(fd.get("legal_name")),
-                      brand_name: String(fd.get("brand_name") || "") || null,
-                      abbr: String(fd.get("abbr") || "") || null,
-                      sector: String(fd.get("sector") || "") || null,
-                      hq_city: String(fd.get("hq_city") || "") || null,
-                      hq_country: String(fd.get("hq_country") || "") || null,
-                      operating_currency: String(fd.get("currency")),
-                      status: String(fd.get("status")),
-                      website: String(fd.get("website") || "") || null,
-                    })
-                  );
-                }}
-              >
-                <Field label="Legal Name *">
-                  <input name="legal_name" required defaultValue={c.legal_name} className={inputClass} />
-                </Field>
-                <Field label="Brand Name">
-                  <input name="brand_name" defaultValue={c.brand_name ?? ""} className={inputClass} />
-                </Field>
-                <Field label="Abbreviation">
-                  <input name="abbr" defaultValue={c.abbr ?? ""} maxLength={4} className={inputClass} />
-                </Field>
-                <Field label="Sector">
-                  <input name="sector" defaultValue={c.sector ?? ""} className={inputClass} />
-                </Field>
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="City">
-                    <input name="hq_city" defaultValue={c.hq_city ?? ""} className={inputClass} />
-                  </Field>
-                  <Field label="Country">
-                    <input name="hq_country" defaultValue={c.hq_country ?? ""} className={inputClass} />
-                  </Field>
-                </div>
-                <Field label="Website">
-                  <input name="website" defaultValue={c.website ?? ""} className={inputClass} />
-                </Field>
-                <Field label="Operating Currency *">
-                  <select name="currency" defaultValue={c.operating_currency} className={inputClass}>
-                    <option value="INR">INR</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </Field>
-                <Field label="Status">
-                  <select name="status" defaultValue={c.status} className={inputClass}>
-                    <SelectOptions values={["active", "exited", "written_off"]} />
-                  </select>
-                </Field>
-                <Submit label="Save Changes" saving={saving} />
-              </form>
+              <CompanyEditForm
+                company={c}
+                saving={saving}
+                onSave={(input) => save(() => ctx.updateCompany(input))}
+              />
             );
           })()}
 
@@ -647,6 +600,118 @@ export function EditRecordModal({
 
 function Missing() {
   return <p className="text-2xs text-ink-faint">Record not found.</p>;
+}
+
+function CompanyEditForm({
+  company,
+  saving,
+  onSave,
+}: {
+  company: FundOSData["companies"][number];
+  saving: boolean;
+  onSave: (input: {
+    id: string;
+    legal_name: string;
+    brand_name: string | null;
+    abbr: string | null;
+    sector: string | null;
+    hq_city: string | null;
+    hq_country: string | null;
+    operating_currency: string;
+    status: string;
+    website: string | null;
+    logo_url: string | null;
+  }) => void;
+}) {
+  const [website, setWebsite] = useState(company.website ?? "");
+  const [syncing, setSyncing] = useState(false);
+  const previewLabel = company.brand_name ?? company.legal_name;
+  const busy = saving || syncing;
+
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        const websiteTrimmed = website.trim() || null;
+        const websiteChanged = websiteTrimmed !== (company.website ?? "").trim();
+        let logo_url: string | null = company.logo_url;
+
+        setSyncing(true);
+        try {
+          if (!websiteTrimmed) {
+            logo_url = null;
+          } else if (websiteChanged) {
+            logo_url = isSupabaseConfigured()
+              ? await syncCompanyLogo(company.id, websiteTrimmed, previewLabel)
+              : faviconUrlFromWebsite(websiteTrimmed);
+          }
+
+          onSave({
+            id: company.id,
+            legal_name: String(fd.get("legal_name")),
+            brand_name: String(fd.get("brand_name") || "") || null,
+            abbr: String(fd.get("abbr") || "") || null,
+            sector: String(fd.get("sector") || "") || null,
+            hq_city: String(fd.get("hq_city") || "") || null,
+            hq_country: String(fd.get("hq_country") || "") || null,
+            operating_currency: String(fd.get("currency")),
+            status: String(fd.get("status")),
+            website: websiteTrimmed,
+            logo_url,
+          });
+        } finally {
+          setSyncing(false);
+        }
+      }}
+    >
+      <Field label="Legal Name *">
+        <input name="legal_name" required defaultValue={company.legal_name} className={inputClass} />
+      </Field>
+      <Field label="Brand Name">
+        <input name="brand_name" defaultValue={company.brand_name ?? ""} className={inputClass} />
+      </Field>
+      <Field label="Abbreviation">
+        <input name="abbr" defaultValue={company.abbr ?? ""} maxLength={4} className={inputClass} />
+      </Field>
+      <Field label="Sector">
+        <input name="sector" defaultValue={company.sector ?? ""} className={inputClass} />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="City">
+          <input name="hq_city" defaultValue={company.hq_city ?? ""} className={inputClass} />
+        </Field>
+        <Field label="Country">
+          <input name="hq_country" defaultValue={company.hq_country ?? ""} className={inputClass} />
+        </Field>
+      </div>
+      <Field label="Website">
+        <div className="flex items-center gap-2">
+          <input
+            name="website"
+            type="url"
+            placeholder="https://example.com"
+            className={`${inputClass} min-w-0 flex-1`}
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+          />
+          <FaviconPreview website={website} label={previewLabel} size={32} />
+        </div>
+      </Field>
+      <Field label="Operating Currency *">
+        <select name="currency" defaultValue={company.operating_currency} className={inputClass}>
+          <option value="INR">INR</option>
+          <option value="USD">USD</option>
+        </select>
+      </Field>
+      <Field label="Status">
+        <select name="status" defaultValue={company.status} className={inputClass}>
+          <SelectOptions values={["active", "exited", "written_off"]} />
+        </select>
+      </Field>
+      <Submit label="Save Changes" saving={busy} />
+    </form>
+  );
 }
 
 function fundLabel(f: { vehicle_code: string; name: string }): string {

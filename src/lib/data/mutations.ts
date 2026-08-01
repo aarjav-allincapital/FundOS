@@ -59,6 +59,7 @@ function lotCode(
 // ------------------------------------------------------------------
 
 export interface AddCompanyInput {
+  id?: string;
   legal_name: string;
   brand_name?: string;
   sector?: string;
@@ -66,6 +67,8 @@ export interface AddCompanyInput {
   hq_country?: string;
   operating_currency: string;
   abbr?: string;
+  website?: string | null;
+  logo_url?: string | null;
 }
 
 export function addCompany(data: FundOSData, input: AddCompanyInput): FundOSData {
@@ -74,7 +77,7 @@ export function addCompany(data: FundOSData, input: AddCompanyInput): FundOSData
     input.abbr?.toUpperCase() ||
     generateAbbr(input.brand_name || input.legal_name, existingAbbrs);
   const company: Company = {
-    id: id("co"),
+    id: input.id ?? id("co"),
     fund_brand_id: FUND_BRAND_ID,
     abbr,
     legal_name: input.legal_name,
@@ -82,8 +85,8 @@ export function addCompany(data: FundOSData, input: AddCompanyInput): FundOSData
     sector: input.sector ?? null,
     hq_country: input.hq_country ?? null,
     hq_city: input.hq_city ?? null,
-    website: null,
-    logo_url: null,
+    website: input.website ?? null,
+    logo_url: input.logo_url ?? null,
     operating_currency: input.operating_currency,
     status: "active",
     latest_mark_price: null,

@@ -10,6 +10,10 @@ import { CashInvestedField } from "@/components/forms/CashInvestedField";
 import { DateInput } from "@/components/forms/form-ui";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
 import { suggestCompanyAbbr } from "@/lib/calc/abbr";
+import { faviconUrlFromWebsite } from "@/lib/company-logo";
+import { newCompanyId, syncCompanyLogo } from "@/lib/company-logo-sync";
+import { FaviconPreview } from "@/components/forms/FaviconPreview";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type { DealSource, DealStage, InstrumentType, ValuationType } from "@/lib/types";
 
 export type AddRecordMode =
@@ -192,14 +196,22 @@ function Field({
 const inputClass =
   "rounded border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-line-strong";
 
-function Submit({ label = "Save", saving = false }: { label?: string; saving?: boolean }) {
+function Submit({
+  label = "Save",
+  saving = false,
+  savingLabel = "Saving…",
+}: {
+  label?: string;
+  saving?: boolean;
+  savingLabel?: string;
+}) {
   return (
     <button
       type="submit"
       disabled={saving}
       className="mt-2 w-full rounded bg-ink py-2 text-[13px] font-semibold text-surface hover:bg-ink/90 disabled:opacity-50"
     >
-      {saving ? "Fetching FX…" : label}
+      {saving ? savingLabel : label}
     </button>
   );
 }
@@ -208,6 +220,7 @@ function CompanyForm({
   onSubmit,
 }: {
   onSubmit: (v: {
+    id?: string;
     legal_name: string;
     brand_name?: string;
     sector?: string;
@@ -215,12 +228,17 @@ function CompanyForm({
     hq_country?: string;
     operating_currency: string;
     abbr?: string;
+    website?: string | null;
+    logo_url?: string | null;
   }) => void;
 }) {
   const [legalName, setLegalName] = useState("");
   const [brandName, setBrandName] = useState("");
   const [abbr, setAbbr] = useState("");
   const [abbrManual, setAbbrManual] = useState(false);
+  const [website, setWebsite] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const previewLabel = brandName.trim() || legalName.trim();
 
   function syncAbbrFromName(nextLegal: string, nextBrand: string) {
     if (abbrManual) return;
@@ -230,18 +248,39 @@ function CompanyForm({
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
-        onSubmit({
-          legal_name: legalName,
-          brand_name: brandName || undefined,
-          sector: String(fd.get("sector") || "") || undefined,
-          hq_city: String(fd.get("hq_city") || "") || undefined,
-          hq_country: String(fd.get("hq_country") || "") || undefined,
-          operating_currency: String(fd.get("currency") || "INR"),
-          abbr: abbr || undefined,
-        });
+        const websiteTrimmed = website.trim() || null;
+        let logo_url: string | null = null;
+        let companyId: string | undefined;
+
+        setSyncing(true);
+        try {
+          if (websiteTrimmed) {
+            if (isSupabaseConfigured()) {
+              companyId = newCompanyId();
+              logo_url = await syncCompanyLogo(companyId, websiteTrimmed, previewLabel || undefined);
+            } else {
+              logo_url = faviconUrlFromWebsite(websiteTrimmed);
+            }
+          }
+
+          onSubmit({
+            id: companyId,
+            legal_name: legalName,
+            brand_name: brandName || undefined,
+            sector: String(fd.get("sector") || "") || undefined,
+            hq_city: String(fd.get("hq_city") || "") || undefined,
+            hq_country: String(fd.get("hq_country") || "") || undefined,
+            operating_currency: String(fd.get("currency") || "INR"),
+            abbr: abbr || undefined,
+            website: websiteTrimmed,
+            logo_url,
+          });
+        } finally {
+          setSyncing(false);
+        }
       }}
     >
       <Field label="Legal Name *">
@@ -285,6 +324,19 @@ function CompanyForm({
       <Field label="Sector">
         <input name="sector" className={inputClass} />
       </Field>
+      <Field label="Website">
+        <div className="flex items-center gap-2">
+          <input
+            name="website"
+            type="url"
+            placeholder="https://example.com"
+            className={cn(inputClass, "min-w-0 flex-1")}
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+          />
+          <FaviconPreview website={website} label={previewLabel || undefined} size={32} />
+        </div>
+      </Field>
       <div className="grid grid-cols-2 gap-2">
         <Field label="City">
           <input name="hq_city" className={inputClass} />
@@ -299,7 +351,7 @@ function CompanyForm({
           <option value="USD">USD</option>
         </select>
       </Field>
-      <Submit label="Add Company" />
+      <Submit label="Add Company" saving={syncing} savingLabel="Fetching logo…" />
     </form>
   );
 }
