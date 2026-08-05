@@ -59,10 +59,11 @@ export default function AdminPage() {
     setStatus(null);
     setError(null);
     try {
+      const sentTo = inviteEmail.trim().toLowerCase();
       const res = await fetch("/api/admin/users/invite", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify({ email: sentTo, role: inviteRole }),
       });
       const json = (await res.json()) as {
         ok?: boolean;
@@ -74,7 +75,7 @@ export default function AdminPage() {
       setInviteEmail("");
       setStatus(
         json.emailSent
-          ? "Invite sent via email."
+          ? `Invitation email sent to ${sentTo}.`
           : `User added${json.warning ? ` — email not sent: ${json.warning}` : "."}`,
       );
       await load();
