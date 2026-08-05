@@ -10,10 +10,61 @@
 import * as XLSX from "xlsx";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
 import {
+  canonicalCompanyName,
+  resolveCompany,
+  type CompanyIdentityInput,
+} from "@/lib/data/entity-resolution";
+import {
   emptyEntities,
+  type ExtractedCompany,
   type ExtractedEntities,
   type ExtractedLot,
 } from "@/lib/ingest/types";
+import type { Company } from "@/lib/types";
+
+function asBatchCompanies(rows: ExtractedCompany[]): Company[] {
+  return rows.map((c, i) => ({
+    id: `batch-${i}`,
+    fund_brand_id: "batch",
+    abbr: null,
+    legal_name: c.legal_name,
+    brand_name: c.brand_name ?? null,
+    aliases: c.aliases ?? [],
+    sector: c.sector ?? null,
+    hq_country: c.hq_country ?? null,
+    hq_city: c.hq_city ?? null,
+    website: c.website ?? null,
+    logo_url: null,
+    operating_currency: c.operating_currency ?? "INR",
+    status: "active",
+    latest_mark_price: null,
+    latest_mark_price_date: null,
+    last_priced_round_date: null,
+    last_approved_post_money_local: null,
+    last_approved_price_per_share: null,
+    created_at: "",
+    updated_at: "",
+  }));
+}
+
+function findBatchCompanyIndex(
+  rows: ExtractedCompany[],
+  identity: CompanyIdentityInput,
+): number | undefined {
+  const key = canonicalCompanyName(identity.legal_name) ||
+    (identity.legal_name ?? "").toLowerCase();
+  if (!key) return undefined;
+  const exact = rows.findIndex(
+    (c) =>
+      canonicalCompanyName(c.legal_name) === key ||
+      canonicalCompanyName(c.brand_name) === key,
+  );
+  if (exact >= 0) return exact;
+  const match = resolveCompany({ companies: asBatchCompanies(rows) }, identity);
+  if (!match) return undefined;
+  const idx = Number(match.company.id.replace("batch-", ""));
+  return Number.isFinite(idx) ? idx : undefined;
+}
 
 type Field =
   | "company"
@@ -156,7 +207,6 @@ export function parseSpreadsheet(
   const cols = mapHeaders(headers);
   if (!cols.company) return out; // without a company column there's nothing to anchor rows to
 
-  const seen = new Map<string, number>(); // normalized name → index in out.companies
   const cell = (row: Record<string, unknown>, field: Field): unknown =>
     cols[field] ? row[cols[field] as string] : undefined;
   const str = (v: unknown): string | undefined => {
@@ -169,21 +219,33 @@ export function parseSpreadsheet(
     if (!name) continue;
 
     const currency = normalizeCurrency(cell(row, "currency"));
-    const key = name.toLowerCase();
-    if (!seen.has(key)) {
-      seen.set(key, out.companies.length);
+    const brand = str(cell(row, "brand"));
+    const idx = findBatchCompanyIndex(out.companies, {
+      legal_name: name,
+      brand_name: brand,
+    });
+    if (idx == null) {
       out.companies.push({
         legal_name: name,
-        brand_name: str(cell(row, "brand")) ?? null,
+        brand_name: brand ?? null,
         sector: str(cell(row, "sector")) ?? null,
         hq_city: str(cell(row, "city")) ?? null,
         hq_country: str(cell(row, "country")) ?? null,
         operating_currency: currency,
         website: str(cell(row, "website")) ?? null,
+        aliases: [],
       });
-    } else if (currency) {
-      const existing = out.companies[seen.get(key)!];
-      if (!existing.operating_currency) existing.operating_currency = currency;
+    } else {
+      const existing = out.companies[idx];
+      if (!existing.operating_currency && currency) existing.operating_currency = currency;
+      if (!existing.brand_name && brand) existing.brand_name = brand;
+      if (
+        canonicalCompanyName(name) !== canonicalCompanyName(existing.legal_name)
+      ) {
+        const aliases = new Set(existing.aliases ?? []);
+        aliases.add(name);
+        existing.aliases = [...aliases];
+      }
     }
 
     const shares = parseNumber(cell(row, "shares"));

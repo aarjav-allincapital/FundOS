@@ -10,7 +10,6 @@
  */
 
 import type {
-  Company,
   Fund,
   FundOSData,
   InstrumentType,
@@ -24,6 +23,12 @@ import {
   type AddLotInput,
 } from "@/lib/data/mutations";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
+import {
+  dedupeCompanyIdentities,
+  findDuplicateInvestmentLot,
+  resolveCompany,
+  withResolvedAlias,
+} from "@/lib/data/entity-resolution";
 import type {
   CommitSummary,
   ExtractedCompany,
@@ -92,26 +97,19 @@ function resolveFund(
   return data.funds[0];
 }
 
-/** Register a company's names so later founders/lots/marks can resolve to its id. */
-function registerCompany(map: Map<string, string>, c: Company): void {
-  if (c.legal_name) map.set(norm(c.legal_name), c.id);
-  if (c.brand_name) map.set(norm(c.brand_name), c.id);
-}
-
 function findExistingCompanyId(
-  map: Map<string, string>,
+  data: FundOSData,
   ec: ExtractedCompany
 ): string | undefined {
-  return map.get(norm(ec.legal_name)) ?? (ec.brand_name ? map.get(norm(ec.brand_name)) : undefined);
+  return resolveCompany(data, ec)?.company.id;
 }
 
 /** Does a company with this name/brand already exist? (for review-time flagging) */
-export function existingCompanyId(data: FundOSData, name: string): string | undefined {
-  const key = norm(name);
-  const c = data.companies.find(
-    (co) => norm(co.legal_name) === key || (co.brand_name != null && norm(co.brand_name) === key)
-  );
-  return c?.id;
+export function existingCompanyId(
+  data: FundOSData,
+  identity: string | ExtractedCompany,
+): string | undefined {
+  return resolveCompany(data, identity)?.company.id;
 }
 
 /** Does this founder already exist for an existing company? */
@@ -132,8 +130,6 @@ export async function applyEntities(
   deps: FxDeps
 ): Promise<ApplyResult> {
   let working = data;
-  const nameToId = new Map<string, string>();
-  working.companies.forEach((c) => registerCompany(nameToId, c));
 
   const summary: CommitSummary = {
     companiesCreated: 0,
@@ -141,6 +137,7 @@ export async function applyEntities(
     founders: 0,
     foundersReused: 0,
     lots: 0,
+    lotsReused: 0,
     marks: 0,
     skipped: 0,
   };
@@ -152,26 +149,43 @@ export async function applyEntities(
     working.founders.map((f) => founderKey(f.company_id, f.name))
   );
 
-  // Companies (dedup against existing + within this batch)
+  // Collapse within-batch name variants first ("Super Living" + "SuperLiving"),
+  // then resolve each against the live portfolio.
   for (const ec of entities.companies) {
-    if (!ec.legal_name?.trim()) { summary.skipped++; continue; }
-    if (findExistingCompanyId(nameToId, ec)) { summary.companiesReused++; continue; }
+    if (!ec.legal_name?.trim()) summary.skipped++;
+  }
+  const companyBatch = dedupeCompanyIdentities(
+    entities.companies.filter((ec) => Boolean(ec.legal_name?.trim())),
+  );
+
+  for (const ec of companyBatch) {
+    const before = working.companies.length;
+    const existed = Boolean(findExistingCompanyId(working, ec));
+    // addCompany is idempotent and enriches the matched company with newly
+    // encountered aliases and previously missing metadata.
     working = addCompany(working, {
       legal_name: ec.legal_name,
       brand_name: ec.brand_name ?? undefined,
+      aliases: ec.aliases,
       sector: ec.sector ?? undefined,
       hq_city: ec.hq_city ?? undefined,
       hq_country: ec.hq_country ?? undefined,
       operating_currency: ec.operating_currency ?? "INR",
+      website: ec.website ?? null,
     });
-    registerCompany(nameToId, working.companies[working.companies.length - 1]);
-    summary.companiesCreated++;
+    if (existed || working.companies.length === before) {
+      summary.companiesReused++;
+    } else {
+      summary.companiesCreated++;
+    }
   }
 
   // Founders (deduped by company + name)
   for (const ef of entities.founders) {
-    const cid = nameToId.get(norm(ef.company_name));
+    const match = resolveCompany(working, ef.company_name);
+    const cid = match?.company.id;
     if (!cid || !ef.name?.trim()) { summary.skipped++; continue; }
+    working = withResolvedAlias(working, cid, ef.company_name);
     const key = founderKey(cid, ef.name);
     if (seenFounders.has(key)) { summary.foundersReused++; continue; }
     working = addFounder(working, {
@@ -187,8 +201,10 @@ export async function applyEntities(
 
   // Lots
   for (const el of entities.lots) {
-    const cid = nameToId.get(norm(el.company_name));
+    const match = resolveCompany(working, el.company_name);
+    const cid = match?.company.id;
     if (!cid || !el.investment_date) { summary.skipped++; continue; }
+    working = withResolvedAlias(working, cid, el.company_name);
     const company = working.companies.find((c) => c.id === cid)!;
     const currency = el.currency ?? company.operating_currency ?? "INR";
     const fund = resolveFund(working, el.fund_code, currency);
@@ -211,6 +227,10 @@ export async function applyEntities(
       cash_invested_local: cashLocal,
       ownership_at_entry_pct: el.ownership_at_entry_pct ?? undefined,
     };
+    if (findDuplicateInvestmentLot(working, input)) {
+      summary.lotsReused++;
+      continue;
+    }
     const fx = await deps.resolveTransactionFx(working, input);
     working = addInvestmentLot(working, { ...input, fx_rate_at_entry: fx });
     summary.lots++;
@@ -218,8 +238,10 @@ export async function applyEntities(
 
   // Valuation marks (fan out to active lots via reporting FX)
   for (const em of entities.marks) {
-    const cid = nameToId.get(norm(em.company_name));
+    const match = resolveCompany(working, em.company_name);
+    const cid = match?.company.id;
     if (!cid || !em.valuation_date || em.price_per_share_local == null) { summary.skipped++; continue; }
+    working = withResolvedAlias(working, cid, em.company_name);
     const company = working.companies.find((c) => c.id === cid)!;
     const fundCurrencies = working.investmentLots
       .filter((l) => l.company_id === cid && l.status === "active")

@@ -49,6 +49,7 @@ export interface UpdateCompanyInput {
   hq_country?: string | null;
   operating_currency?: string;
   abbr?: string | null;
+  aliases?: string[] | null;
   status?: string;
   website?: string | null;
   logo_url?: string | null;
@@ -71,6 +72,7 @@ export function updateCompany(
             hq_country: input.hq_country !== undefined ? input.hq_country : c.hq_country,
             operating_currency: input.operating_currency ?? c.operating_currency,
             abbr: input.abbr !== undefined ? input.abbr : c.abbr,
+            aliases: input.aliases !== undefined ? input.aliases : c.aliases,
             status: input.status ?? c.status,
             website: input.website !== undefined ? input.website : c.website,
             logo_url: input.logo_url !== undefined ? input.logo_url : c.logo_url,

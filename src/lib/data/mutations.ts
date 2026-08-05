@@ -20,6 +20,11 @@ import { buildSnapshot } from "@/lib/calc/snapshot";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
 import { resolveFxRate } from "@/lib/calc/fx";
 import { suggestCompanyAbbr } from "@/lib/calc/abbr";
+import {
+  findDuplicateInvestmentLot,
+  mergedCompanyAliases,
+  resolveCompany,
+} from "@/lib/data/entity-resolution";
 import { FUND_BRAND_ID } from "@/lib/data/bootstrap";
 import {
   storeManualFxRate,
@@ -67,11 +72,36 @@ export interface AddCompanyInput {
   hq_country?: string;
   operating_currency: string;
   abbr?: string;
+  aliases?: string[];
   website?: string | null;
   logo_url?: string | null;
 }
 
 export function addCompany(data: FundOSData, input: AddCompanyInput): FundOSData {
+  const match = resolveCompany(data, input);
+  if (match) {
+    const aliases = mergedCompanyAliases(match.company, input);
+    return {
+      ...data,
+      companies: data.companies.map((company) =>
+        company.id === match.company.id
+          ? {
+              ...company,
+              aliases,
+              // Preserve authoritative existing values; only fill blanks.
+              brand_name: company.brand_name ?? input.brand_name ?? null,
+              website: company.website ?? input.website ?? null,
+              logo_url: company.logo_url ?? input.logo_url ?? null,
+              sector: company.sector ?? input.sector ?? null,
+              hq_city: company.hq_city ?? input.hq_city ?? null,
+              hq_country: company.hq_country ?? input.hq_country ?? null,
+              updated_at: new Date().toISOString(),
+            }
+          : company,
+      ),
+    };
+  }
+
   const existingAbbrs = data.companies.map((c) => c.abbr).filter(Boolean) as string[];
   const abbr =
     input.abbr?.toUpperCase() ||
@@ -82,6 +112,7 @@ export function addCompany(data: FundOSData, input: AddCompanyInput): FundOSData
     abbr,
     legal_name: input.legal_name,
     brand_name: input.brand_name ?? null,
+    aliases: input.aliases ?? [],
     sector: input.sector ?? null,
     hq_country: input.hq_country ?? null,
     hq_city: input.hq_city ?? null,
@@ -152,6 +183,7 @@ export function addInvestmentLot(data: FundOSData, input: AddLotInput): FundOSDa
   const company = data.companies.find((c) => c.id === input.company_id);
   const fund = data.funds.find((f) => f.id === input.fund_id);
   if (!company || !fund) return data;
+  if (findDuplicateInvestmentLot(data, input)) return data;
 
   const fx =
     input.fx_rate_at_entry ??

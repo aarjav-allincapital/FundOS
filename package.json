@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "sim": "tsx scripts/sim.ts && tsx scripts/sim2.ts && tsx scripts/sim3.ts && tsx scripts/sim4.ts && tsx scripts/sim5.ts && tsx scripts/sim6.ts && tsx scripts/sim7.ts && tsx scripts/sim8.ts && tsx scripts/sim9.ts"
+    "sim": "tsx scripts/sim.ts && tsx scripts/sim2.ts && tsx scripts/sim3.ts && tsx scripts/sim4.ts && tsx scripts/sim5.ts && tsx scripts/sim6.ts && tsx scripts/sim7.ts && tsx scripts/sim8.ts && tsx scripts/sim9.ts && tsx scripts/sim10.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",

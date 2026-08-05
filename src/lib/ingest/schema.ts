@@ -20,6 +20,11 @@ Valuation marks — extract one whenever a document states a price per share, a 
 Rounds with multiple investors: a financing round often lists SEVERAL participants (a lead + co-investors). Create ONE lot per named investor and set its investor_name to that investor. Do NOT try to guess which investor is "ours" and do NOT merge them — extract every investor's line so the user can pick their own fund's lot in review. If an investor is clearly "All In Capital" or "AIC", use that exact investor_name. If the document names only one investor, still fill investor_name.
 
 Hard rules:
+- Put former names, aliases, abbreviations, acronyms, and clearly stated
+  alternate spellings in companies[].aliases (e.g. "SuperLiving", "SLR" when
+  the legal name is "Super Living Pvt Ltd"). Do not invent aliases.
+- Prefer ONE companies[] row per real entity. Spelling/spacing variants of the
+  same company must not become separate companies[] entries.
 - NEVER invent a number, date, or name. If a value is not clearly present, use null.
 - Dates: ISO format YYYY-MM-DD. If only a month/year is given, still emit a valid date (first of the month) only when unambiguous; otherwise null.
 - Currencies: normalize to a 3-letter code ("INR", "USD"). ₹ → INR, $ → USD.
@@ -35,7 +40,7 @@ export const EXTRACTION_TOOL_NAME = "record_entities";
  * JSON mode instead of a tool schema. Mirrors EXTRACTION_SCHEMA's keys.
  */
 export const EXTRACTION_JSON_INSTRUCTION = `Respond with a single JSON object (no prose, no markdown) with exactly these keys, each an array (use [] when none):
-- "companies": [{ "legal_name", "brand_name", "sector", "hq_city", "hq_country", "operating_currency", "website" }]
+- "companies": [{ "legal_name", "brand_name", "aliases", "sector", "hq_city", "hq_country", "operating_currency", "website" }]
 - "founders": [{ "company_name", "name", "role", "email", "linkedin_url" }]
 - "lots": [{ "company_name", "investor_name", "fund_code", "round_name", "investment_date", "vehicle", "shares_acquired", "price_per_share_local", "currency", "cash_invested_local", "ownership_at_entry_pct" }] (one lot per investor named in a round; set investor_name for each)
 - "marks": [{ "company_name", "valuation_date", "price_per_share_local", "post_money_local", "valuation_type" }]
@@ -50,6 +55,7 @@ const companyItem = {
   properties: {
     legal_name: { type: "string" },
     brand_name: nullableString,
+    aliases: { type: "array", items: { type: "string" } },
     sector: nullableString,
     hq_city: nullableString,
     hq_country: nullableString,
@@ -59,6 +65,7 @@ const companyItem = {
   required: [
     "legal_name",
     "brand_name",
+    "aliases",
     "sector",
     "hq_city",
     "hq_country",

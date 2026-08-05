@@ -9,6 +9,7 @@
 export interface ExtractedCompany {
   legal_name: string;
   brand_name?: string | null;
+  aliases?: string[];
   sector?: string | null;
   hq_city?: string | null;
   hq_country?: string | null;
@@ -90,6 +91,7 @@ export interface CommitSummary {
   founders: number;
   foundersReused: number;
   lots: number;
+  lotsReused: number;
   marks: number;
   skipped: number;
 }

@@ -40,7 +40,7 @@ const TABLES: TableSpec[] = [
     table: "companies",
     key: "companies",
     columns: [
-      "id", "fund_brand_id", "abbr", "legal_name", "brand_name", "sector",
+      "id", "fund_brand_id", "abbr", "legal_name", "brand_name", "aliases", "sector",
       "hq_country", "hq_city", "website", "logo_url", "operating_currency", "status",
       "latest_mark_price", "latest_mark_price_date", "last_priced_round_date",
       "last_approved_post_money_local", "last_approved_price_per_share",

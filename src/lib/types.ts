@@ -96,6 +96,8 @@ export interface Company {
   abbr: string | null;
   legal_name: string;
   brand_name: string | null;
+  /** Alternate, previous, abbreviated, or commonly misspelled names. */
+  aliases?: string[] | null;
   sector: string | null;
   hq_country: string | null;
   hq_city: string | null;
