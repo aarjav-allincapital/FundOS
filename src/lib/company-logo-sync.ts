@@ -1,6 +1,4 @@
-import { faviconUrlFromWebsite } from "@/lib/company-logo";
-
-/** Upload favicon to Supabase storage; falls back to DuckDuckGo URL locally. */
+/** Upload favicon to Supabase storage (or inline WebP in local mode). */
 export async function syncCompanyLogo(
   companyId: string,
   website: string,
@@ -15,11 +13,11 @@ export async function syncCompanyLogo(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ companyId, website: trimmed, label }),
     });
-    if (!res.ok) return faviconUrlFromWebsite(trimmed);
+    if (!res.ok) return null;
     const data = (await res.json()) as { logo_url?: string | null };
-    return data.logo_url ?? faviconUrlFromWebsite(trimmed);
+    return data.logo_url ?? null;
   } catch {
-    return faviconUrlFromWebsite(trimmed);
+    return null;
   }
 }
 

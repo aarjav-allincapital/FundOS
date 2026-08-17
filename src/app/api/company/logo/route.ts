@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { isAllowedOrgEmail, isSupabaseConfigured } from "@/lib/supabase/config";
-import { storeCompanyLogoInSupabase } from "@/lib/company-logo-server";
+import {
+  companyLogoDataUrl,
+  storeCompanyLogoInSupabase,
+} from "@/lib/company-logo-server";
+import { resolveCompanyLogoWebp } from "@/lib/company-logo-fetch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,9 +19,7 @@ interface LogoRequest {
 async function assertOrgUser(): Promise<
   { ok: true } | { ok: false; status: number; error: string }
 > {
-  if (!isSupabaseConfigured()) {
-    return { ok: false, status: 503, error: "Supabase is not configured." };
-  }
+  if (!isSupabaseConfigured()) return { ok: true };
   const sb = await getSupabaseServerClient();
   if (!sb) return { ok: false, status: 503, error: "Auth client unavailable." };
   const {
@@ -45,6 +47,7 @@ export async function POST(request: Request) {
 
   const companyId = body.companyId?.trim();
   const website = body.website?.trim();
+  const label = body.label?.trim() || undefined;
   if (!companyId) {
     return NextResponse.json({ error: "companyId is required" }, { status: 400 });
   }
@@ -53,18 +56,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const logo_url = await storeCompanyLogoInSupabase({
-      companyId,
-      website,
-      label: body.label?.trim() || undefined,
-    });
-    if (!logo_url) {
-      return NextResponse.json(
-        { error: "Could not store logo — Supabase storage unavailable." },
-        { status: 503 },
-      );
+    const logo_url = await storeCompanyLogoInSupabase({ companyId, website, label });
+    if (logo_url) {
+      return NextResponse.json({ ok: true, logo_url });
     }
-    return NextResponse.json({ ok: true, logo_url });
+
+    // Local-first mode: persist as inline WebP data URL.
+    const webp = await resolveCompanyLogoWebp(website, label);
+    return NextResponse.json({ ok: true, logo_url: companyLogoDataUrl(webp) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Logo sync failed";
     return NextResponse.json({ error: message }, { status: 500 });

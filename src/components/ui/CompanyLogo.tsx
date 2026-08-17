@@ -1,7 +1,14 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import type { Company } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
-/** Company avatar — logo when available, otherwise abbr badge. */
+function isDuckDuckGoPlaceholder(url: string): boolean {
+  return url.includes("icons.duckduckgo.com");
+}
+
+/** Company avatar — Supabase logo when available, otherwise abbr badge. */
 export function CompanyLogo({
   company,
   size = 24,
@@ -13,11 +20,19 @@ export function CompanyLogo({
 }) {
   const label = company.brand_name ?? company.legal_name;
   const px = `${size}px`;
+  const rawUrl = company.logo_url;
+  const [broken, setBroken] = useState(false);
 
-  if (company.logo_url) {
+  useEffect(() => {
+    setBroken(false);
+  }, [rawUrl, company.updated_at]);
+  const useImage =
+    rawUrl && !isDuckDuckGoPlaceholder(rawUrl) && !broken;
+
+  if (useImage) {
     const src = company.updated_at
-      ? `${company.logo_url}?v=${encodeURIComponent(company.updated_at)}`
-      : company.logo_url;
+      ? `${rawUrl}?v=${encodeURIComponent(company.updated_at)}`
+      : rawUrl;
     return (
       <img
         src={src}
@@ -31,7 +46,9 @@ export function CompanyLogo({
             : "bg-surface-subtle",
           className,
         )}
+        style={{ width: px, height: px }}
         loading="lazy"
+        onError={() => setBroken(true)}
       />
     );
   }
@@ -39,14 +56,14 @@ export function CompanyLogo({
   return (
     <span
       className={cn(
-        "flex shrink-0 items-center justify-center rounded bg-ink px-1 text-[10px] font-bold text-surface",
+        "flex shrink-0 items-center justify-center rounded bg-ink text-[10px] font-bold text-surface",
         className,
       )}
-      style={{ minWidth: px, height: px }}
+      style={{ minWidth: px, width: px, height: px }}
       title={label}
       aria-hidden
     >
-      {company.abbr ?? "—"}
+      {company.abbr ?? (label.slice(0, 2).toUpperCase() || "—")}
     </span>
   );
 }
