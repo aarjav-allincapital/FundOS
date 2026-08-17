@@ -84,6 +84,19 @@ async function readFileBytes(file: File): Promise<Uint8Array> {
   );
 }
 
+/**
+ * Copy a picker/drop file into browser-owned memory before Safari can revoke
+ * the original input or DataTransfer handle.
+ */
+export async function snapshotIngestFile(file: File): Promise<File> {
+  const bytes = await readFileBytes(file);
+  return new File([bytes as BlobPart], file.name, {
+    // Preserve an empty MIME type so ingestFile can infer it from the extension.
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
+
 async function uploadToStorage(
   file: File,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {

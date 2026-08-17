@@ -69,12 +69,12 @@ export default function IngestPage() {
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<CommitSummary | null>(null);
 
-  function handleFiles(files: File[]) {
+  async function handleFiles(files: File[]) {
     setError(null);
     setSummary(null);
     // Hand files to the background service — extraction runs off the render
-    // path so the user can keep working while decks/sheets process.
-    enqueue(files, { autoCommit: false });
+    // path after Safari-safe in-memory snapshots have been created.
+    await enqueue(files, { autoCommit: false });
   }
 
   // Pull finished background jobs into the review queue as they complete.

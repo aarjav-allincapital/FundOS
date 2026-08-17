@@ -19,6 +19,7 @@ const STATUS_META: Record<
   IngestJobStatus,
   { label: string; className: string }
 > = {
+  reading: { label: "Reading…", className: "text-ink-muted" },
   queued: { label: "Queued", className: "text-ink-faint" },
   extracting: { label: "Extracting…", className: "text-ink-muted" },
   ready: { label: "Ready to review", className: "text-ink" },
@@ -29,7 +30,7 @@ const STATUS_META: Record<
 
 function StatusIcon({ status }: { status: IngestJobStatus }) {
   if (status === "queued") return <Clock className="h-3.5 w-3.5 text-ink-faint" />;
-  if (status === "extracting" || status === "committing")
+  if (status === "reading" || status === "extracting" || status === "committing")
     return <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted" />;
   if (status === "committed")
     return <CheckCircle2 className="h-3.5 w-3.5 text-gain" />;

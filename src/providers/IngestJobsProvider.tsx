@@ -7,8 +7,8 @@
  * time OFF the render path, so the user can keep navigating while decks/sheets
  * extract (the slow LLM/OCR step). Each job moves through:
  *
- *   queued → extracting → ready        (needs review; entities held on the job)
- *   queued → extracting → committing → committed   (autoCommit deterministic imports)
+ *   reading → queued → extracting → ready        (needs review; entities held on the job)
+ *   reading → queued → extracting → committing → committed   (autoCommit deterministic imports)
  *   … → error
  *
  * The queue lives at app scope (mounted under FundOSProvider) so it survives
@@ -25,7 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ingestFile } from "@/lib/ingest/ingest-file";
+import { ingestFile, snapshotIngestFile } from "@/lib/ingest/ingest-file";
 import { useFundOS } from "@/providers/FundOSProvider";
 import type {
   CommitSummary,
@@ -34,6 +34,7 @@ import type {
 } from "@/lib/ingest/types";
 
 export type IngestJobStatus =
+  | "reading"
   | "queued"
   | "extracting"
   | "ready"
@@ -62,7 +63,7 @@ export interface IngestJob {
 interface IngestJobsContextValue {
   jobs: IngestJob[];
   activeCount: number;
-  enqueue: (files: File[], opts?: { autoCommit?: boolean }) => void;
+  enqueue: (files: File[], opts?: { autoCommit?: boolean }) => Promise<void>;
   removeJob: (id: string) => void;
   clearFinished: () => void;
   /** Mark a "ready" job as pulled into a review queue (won't be offered again). */
@@ -153,33 +154,58 @@ export function IngestJobsProvider({ children }: { children: React.ReactNode }) 
       }
     } finally {
       runningRef.current = false;
+      // A concurrent enqueue can finish snapshotting just as this worker sees
+      // an empty queue. Schedule another drain so that file cannot get stuck.
+      if (queueRef.current.length > 0) {
+        queueMicrotask(() => void drainQueue());
+      }
     }
   }, [patchJob]);
 
   const enqueue = useCallback(
-    (files: File[], opts?: { autoCommit?: boolean }) => {
+    async (files: File[], opts?: { autoCommit?: boolean }) => {
       if (files.length === 0) return;
       const autoCommit = opts?.autoCommit ?? false;
       const now = Date.now();
-      const created: IngestJob[] = files.map((file) => {
+      const pending = files.map((file) => {
         const id = nextJobId();
-        filesRef.current.set(id, file);
         jobsAutoCommitRef.current.set(id, autoCommit);
-        queueRef.current.push(id);
-        return {
+        const job: IngestJob = {
           id,
           fileName: file.name,
           size: file.size,
-          status: "queued" as const,
+          status: "reading",
           autoCommit,
           createdAt: now,
           updatedAt: now,
         };
+        return { id, file, job };
       });
-      setJobs((prev) => [...created, ...prev]);
+
+      setJobs((prev) => [...pending.map(({ job }) => job), ...prev]);
+
+      // Materialize every selected file immediately and concurrently while the
+      // input/DataTransfer still owns a valid Safari file handle. Only stable,
+      // memory-backed File objects enter the slower extraction queue.
+      await Promise.all(
+        pending.map(async ({ id, file }) => {
+          try {
+            const stableFile = await snapshotIngestFile(file);
+            filesRef.current.set(id, stableFile);
+            queueRef.current.push(id);
+            patchJob(id, { status: "queued" });
+          } catch (err) {
+            const detail =
+              err instanceof Error ? err.message : "The browser could not read the file.";
+            jobsAutoCommitRef.current.delete(id);
+            patchJob(id, { status: "error", error: `Ingest failed: ${detail}` });
+          }
+        }),
+      );
+
       void drainQueue();
     },
-    [drainQueue],
+    [drainQueue, patchJob],
   );
 
   const removeJob = useCallback((id: string) => {
@@ -209,6 +235,7 @@ export function IngestJobsProvider({ children }: { children: React.ReactNode }) 
     () =>
       jobs.filter(
         (j) =>
+          j.status === "reading" ||
           j.status === "queued" ||
           j.status === "extracting" ||
           j.status === "committing",
