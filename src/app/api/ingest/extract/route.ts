@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { gunzipSync } from "node:zlib";
 import Anthropic from "@anthropic-ai/sdk";
 import mammoth from "mammoth";
 import {
@@ -20,8 +21,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 function env(key: string): string | undefined {
-  const v = process.env[key];
-  return v?.trim() || undefined;
+  // Strip surrounding quotes/whitespace: a value like GEMINI_MODEL="foo" in an
+  // env file otherwise reaches the API with literal quotes → "unexpected model
+  // name format" (400) and every extraction fails.
+  const v = process.env[key]?.trim().replace(/^["']|["']$/g, "").trim();
+  return v || undefined;
 }
 
 interface ExtractRequest {
@@ -99,10 +103,23 @@ function shapeEntities(raw: Partial<ExtractedEntities> | null | undefined): Extr
   };
 }
 
+async function readExtractBody(request: Request): Promise<ExtractRequest> {
+  const buf = Buffer.from(await request.arrayBuffer());
+  const encoding = `${request.headers.get("content-encoding") ?? ""} ${request.headers.get("x-fundos-encoding") ?? ""}`.toLowerCase();
+  if (encoding.includes("gzip")) {
+    try {
+      return JSON.parse(gunzipSync(buf).toString("utf8")) as ExtractRequest;
+    } catch {
+      // Some proxies already decompress Content-Encoding: gzip.
+    }
+  }
+  return JSON.parse(buf.toString("utf8")) as ExtractRequest;
+}
+
 export async function POST(request: Request) {
   let body: ExtractRequest;
   try {
-    body = (await request.json()) as ExtractRequest;
+    body = await readExtractBody(request);
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -285,11 +302,45 @@ async function extractWithGemini(
   });
 
   const base = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
-  // Prefer an explicit current model. gemini-2.5-flash is blocked for new API keys.
-  const model = env("GEMINI_MODEL") || "gemini-3.6-flash";
   const apiKey = env("GEMINI_API_KEY");
   if (!apiKey) throw new HttpError("GEMINI_API_KEY is not configured.", 400);
 
+  // Try the configured model first, then stable fallbacks. gemini-flash-latest is
+  // an always-current alias; gemini-3.6-flash is a concrete fallback. Retired
+  // (404) or overloaded (503) models are skipped instead of failing the ingest.
+  const candidates = [
+    env("GEMINI_MODEL"),
+    "gemini-flash-latest",
+    "gemini-3.6-flash",
+  ].filter((m, i, a): m is string => Boolean(m) && a.indexOf(m) === i);
+
+  let lastRetryableMsg = "";
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i];
+    const isLast = i === candidates.length - 1;
+    try {
+      return await callGemini(base, apiKey, model, parts);
+    } catch (e) {
+      if (!(e instanceof GeminiRetryable) || isLast) {
+        if (e instanceof GeminiRetryable) throw new HttpError(`Gemini error: ${e.message}`, 502);
+        throw e;
+      }
+      lastRetryableMsg = e.message;
+      console.warn("[ingest] Gemini model %s unavailable (%s) — trying %s", model, e.message, candidates[i + 1]);
+    }
+  }
+  throw new HttpError(`Gemini error: ${lastRetryableMsg || "no usable model"}`, 502);
+}
+
+/** A model-level failure (retired/overloaded/bad name) that warrants a fallback. */
+class GeminiRetryable extends Error {}
+
+async function callGemini(
+  base: string,
+  apiKey: string,
+  model: string,
+  parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }>
+): Promise<ExtractedEntities> {
   // Keep generationConfig conservative — unsupported fields (e.g. thinkingBudget
   // on Pro / Gemini 3) come back as a vague "invalid argument" 400.
   const generationConfig: Record<string, unknown> = {
@@ -313,6 +364,14 @@ async function extractWithGemini(
       contents: [{ role: "user", parts }],
       generationConfig,
     }),
+    signal: AbortSignal.timeout(120_000),
+  }).catch((err: unknown) => {
+    const name = err instanceof Error ? err.name : "";
+    const msg = err instanceof Error ? err.message : "network error";
+    if (name === "TimeoutError" || name === "AbortError" || /timeout|aborted/i.test(msg)) {
+      throw new HttpError("Gemini timed out — try a smaller or clearer PDF.", 504);
+    }
+    throw new HttpError(`Gemini request failed: ${msg}`, 502);
   });
 
   if (!res.ok) {
@@ -323,12 +382,17 @@ async function extractWithGemini(
     } catch {
       /* keep status */
     }
-    const keyHint =
-      /API key|permission|PERMISSION_DENIED|unauthenticated/i.test(msg)
-        ? " (check GEMINI_API_KEY at aistudio.google.com/apikey)"
-        : /no longer available|NOT_FOUND|invalid argument|INVALID_ARGUMENT/i.test(msg)
-          ? ` (try GEMINI_MODEL=gemini-3.6-flash; current=${model})`
-          : "";
+    // Model-level problems → let the caller fall back to another model.
+    if (
+      res.status === 404 ||
+      res.status === 503 ||
+      /no longer available|NOT_FOUND|UNAVAILABLE|unexpected model name|overloaded|high demand/i.test(msg)
+    ) {
+      throw new GeminiRetryable(msg);
+    }
+    const keyHint = /API key|permission|PERMISSION_DENIED|unauthenticated/i.test(msg)
+      ? " (check GEMINI_API_KEY at aistudio.google.com/apikey)"
+      : "";
     throw new HttpError(`Gemini error: ${msg}${keyHint}`, res.status === 403 ? 400 : 502);
   }
 
