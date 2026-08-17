@@ -29,14 +29,59 @@ function guessMediaType(name: string): string {
   return "";
 }
 
-async function fileToBase64(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
+function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+function readWithFileReader(file: File): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+      else reject(new Error("The browser returned no file data."));
+    };
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("The browser could not read the file."));
+    reader.onabort = () => reject(new Error("File reading was cancelled."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/**
+ * Materialize the selected file while its browser handle is still valid.
+ * Safari and cloud-backed files can intermittently throw an I/O read error;
+ * retry once, then use FileReader's separate implementation as a fallback.
+ */
+async function readFileBytes(file: File): Promise<Uint8Array> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const buffer = await file.arrayBuffer();
+      if (file.size > 0 && buffer.byteLength === 0) {
+        throw new Error("The browser returned an empty file.");
+      }
+      return new Uint8Array(buffer);
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+  }
+
+  try {
+    return new Uint8Array(await readWithFileReader(file));
+  } catch (err) {
+    lastError = err;
+  }
+
+  const detail = lastError instanceof Error ? lastError.message : "I/O read failed";
+  throw new Error(
+    `Could not read “${file.name}” (${detail}). Download it to this device and select it again.`,
+  );
 }
 
 async function uploadToStorage(
@@ -209,8 +254,16 @@ async function ingestFileInner(file: File): Promise<IngestResult> {
     // Prefer gzipped inline base64 so a ~3.7 MB SHA stays under Vercel's 4.5 MB
     // body cap (base64 inflates ~33%; gzip usually takes that back off). Fall
     // back to Storage only when the compressed payload still will not fit.
+    // Snapshot the bytes once. This prevents background processing from
+    // depending on a stale DataTransfer/iCloud file handle and also avoids a
+    // second disk read if the Storage fallback is needed.
+    const bytes = await readFileBytes(file);
+    const stableFile = new File([bytes as BlobPart], file.name, {
+      type: file.type || mediaType,
+      lastModified: file.lastModified,
+    });
     const inlinePayload = {
-      fileBase64: await fileToBase64(file),
+      fileBase64: bytesToBase64(bytes),
       mediaType,
       filename: file.name,
     };
@@ -223,7 +276,7 @@ async function ingestFileInner(file: File): Promise<IngestResult> {
       return postExtract(inlinePayload);
     }
 
-    const uploaded = await uploadToStorage(file);
+    const uploaded = await uploadToStorage(stableFile);
     if (!uploaded.ok) return uploaded;
     return postExtract({
       storagePath: uploaded.path,
