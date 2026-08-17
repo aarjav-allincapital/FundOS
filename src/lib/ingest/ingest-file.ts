@@ -6,13 +6,13 @@
 import { parseSpreadsheet } from "@/lib/ingest/parse-spreadsheet";
 import { DOCX_MEDIA_TYPE } from "@/lib/ingest/schema";
 import type { ExtractedEntities, Provenance } from "@/lib/ingest/types";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-const INGEST_BUCKET = "ingest-uploads";
-/** Inline base64 in the request body only when comfortably under Vercel's ~4.5MB cap. */
-const INLINE_MAX_BYTES = 3 * 1024 * 1024;
+/** Vercel serverless body cap is ~4.5 MB. Stay under it with a little headroom. */
+const VERCEL_BODY_MAX = Math.floor(4.2 * 1024 * 1024);
 /** Hard ceiling regardless of transport (matches the storage bucket cap). */
 const UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+/** Don't leave the UI spinning — fail the job if OCR hasn't returned. */
+const EXTRACT_TIMEOUT_MS = 90_000;
 
 export type IngestResult =
   | { ok: true; entities: ExtractedEntities; method: Provenance["method"] }
@@ -42,15 +42,10 @@ async function fileToBase64(file: File): Promise<string> {
 async function uploadToStorage(
   file: File,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) {
-    return { ok: false, error: "Storage is unavailable. Please try a file under 3 MB." };
-  }
-
   // Ask the server (service role) for a signed upload URL — no bucket RLS needed.
   const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
   let path: string;
-  let token: string;
+  let signedUrl: string;
   try {
     const res = await fetch("/api/ingest/upload-url", {
       method: "POST",
@@ -58,27 +53,140 @@ async function uploadToStorage(
       credentials: "include",
       body: JSON.stringify({ ext }),
     });
-    const json = (await res.json()) as { path?: string; token?: string; error?: string };
-    if (!res.ok || !json.path || !json.token) {
+    const json = (await res.json()) as {
+      path?: string;
+      token?: string;
+      signedUrl?: string;
+      error?: string;
+    };
+    if (!res.ok || !json.path || !json.signedUrl) {
       return { ok: false, error: json.error ?? `Could not prepare upload (${res.status}).` };
     }
     path = json.path;
-    token = json.token;
+    signedUrl = json.signedUrl;
   } catch (err) {
     const detail = err instanceof Error ? err.message : "network error";
     return { ok: false, error: `Could not prepare upload (${detail}).` };
   }
 
-  const { error } = await supabase.storage
-    .from(INGEST_BUCKET)
-    .uploadToSignedUrl(path, token, file);
-  if (error) {
-    return { ok: false, error: `Upload failed: ${error.message}` };
+  // PUT straight to the signed URL. Do NOT go through the browser Supabase
+  // client — it attaches the publishable/anon key as `apikey`, and storage
+  // error responses then lose CORS, which the browser reports as the useless
+  // "Load failed" / "Failed to fetch". The token in the signed URL is enough.
+  try {
+    const put = await fetch(signedUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "x-upsert": "false",
+      },
+      body: file,
+    });
+    if (!put.ok) {
+      const body = await put.text().catch(() => "");
+      return {
+        ok: false,
+        error: `Upload failed (${put.status}). ${body.slice(0, 180) || "Storage rejected the file."}`,
+      };
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "network error";
+    return {
+      ok: false,
+      error: `Upload failed (${detail}). Try a smaller PDF, or export to CSV/XLSX.`,
+    };
   }
   return { ok: true, path };
 }
 
+async function gzipBytes(bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const stream = new Blob([bytes as BlobPart])
+      .stream()
+      .pipeThrough(new CompressionStream("gzip"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function postExtract(
+  payload: {
+    fileBase64?: string;
+    storagePath?: string;
+    mediaType: string;
+    filename: string;
+  },
+): Promise<IngestResult> {
+  const json = JSON.stringify(payload);
+  const raw = new TextEncoder().encode(json);
+  const needsGzip = raw.length > VERCEL_BODY_MAX;
+  const gzipped = needsGzip ? await gzipBytes(raw) : null;
+  const useGzip = Boolean(gzipped && gzipped.length <= VERCEL_BODY_MAX);
+  const body: BodyInit = useGzip
+    ? new Blob([gzipped! as BlobPart], { type: "application/json" })
+    : json;
+  if (needsGzip && !useGzip) {
+    return {
+      ok: false,
+      error: "File is too large to send inline and gzip did not shrink it enough. Try a smaller PDF.",
+    };
+  }
+
+  try {
+    const res = await fetch("/api/ingest/extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Do NOT set Content-Encoding — browsers/CDNs treat that as a
+        // transport header and the POST never reaches the server ("Load failed").
+        ...(useGzip ? { "X-FundOS-Encoding": "gzip" } : {}),
+      },
+      credentials: "include",
+      body,
+      signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
+    });
+    const text = await res.text();
+    let parsed: { entities?: ExtractedEntities; error?: string };
+    try {
+      parsed = JSON.parse(text) as { entities?: ExtractedEntities; error?: string };
+    } catch {
+      return {
+        ok: false,
+        error: `Extraction failed (${res.status}). ${text.slice(0, 180) || "Empty response — try a smaller file or sign in again."}`,
+      };
+    }
+    if (!res.ok || !parsed.entities) {
+      return { ok: false, error: parsed.error ?? `Extraction failed (${res.status})` };
+    }
+    return { ok: true, entities: parsed.entities, method: "extraction" };
+  } catch (err) {
+    const name = err instanceof DOMException ? err.name : "";
+    const detail = err instanceof Error ? err.message : "network error";
+    if (name === "TimeoutError" || name === "AbortError" || /timeout|aborted/i.test(detail)) {
+      return {
+        ok: false,
+        error: `Extraction timed out after ${EXTRACT_TIMEOUT_MS / 1000}s. The document may be too large or the OCR service is stuck — try a smaller PDF.`,
+      };
+    }
+    return {
+      ok: false,
+      error: `Could not reach the extraction service (${detail}). Check your connection or try a smaller PDF.`,
+    };
+  }
+}
+
 export async function ingestFile(file: File): Promise<IngestResult> {
+  try {
+    return await ingestFileInner(file);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "unexpected error";
+    return { ok: false, error: `Ingest failed: ${detail}` };
+  }
+}
+
+async function ingestFileInner(file: File): Promise<IngestResult> {
   const name = file.name.toLowerCase();
 
   if (name.endsWith(".csv")) {
@@ -98,46 +206,30 @@ export async function ingestFile(file: File): Promise<IngestResult> {
       };
     }
 
-    // Small files go inline in the request body; large files upload to Supabase
-    // Storage first (bypassing Vercel's ~4.5MB body limit), then the server
-    // downloads them for OCR.
-    let payload: { fileBase64?: string; storagePath?: string; mediaType: string; filename: string };
-    if (file.size <= INLINE_MAX_BYTES) {
-      payload = { fileBase64: await fileToBase64(file), mediaType, filename: file.name };
-    } else {
-      const uploaded = await uploadToStorage(file);
-      if (!uploaded.ok) return uploaded;
-      payload = { storagePath: uploaded.path, mediaType, filename: file.name };
+    // Prefer gzipped inline base64 so a ~3.7 MB SHA stays under Vercel's 4.5 MB
+    // body cap (base64 inflates ~33%; gzip usually takes that back off). Fall
+    // back to Storage only when the compressed payload still will not fit.
+    const inlinePayload = {
+      fileBase64: await fileToBase64(file),
+      mediaType,
+      filename: file.name,
+    };
+    const inlineJson = new TextEncoder().encode(JSON.stringify(inlinePayload));
+    const gzipped = await gzipBytes(inlineJson);
+    const gzipFits = Boolean(gzipped && gzipped.length <= VERCEL_BODY_MAX);
+    const rawFits = inlineJson.length <= VERCEL_BODY_MAX;
+
+    if (gzipFits || rawFits) {
+      return postExtract(inlinePayload);
     }
 
-    try {
-      const res = await fetch("/api/ingest/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
-      const raw = await res.text();
-      let json: { entities?: ExtractedEntities; error?: string };
-      try {
-        json = JSON.parse(raw) as { entities?: ExtractedEntities; error?: string };
-      } catch {
-        return {
-          ok: false,
-          error: `Extraction failed (${res.status}). ${raw.slice(0, 180) || "Empty response — try a smaller file or sign in again."}`,
-        };
-      }
-      if (!res.ok || !json.entities) {
-        return { ok: false, error: json.error ?? `Extraction failed (${res.status})` };
-      }
-      return { ok: true, entities: json.entities, method: "extraction" };
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : "network error";
-      return {
-        ok: false,
-        error: `Could not reach the extraction service (${detail}). Check your connection or try a smaller PDF.`,
-      };
-    }
+    const uploaded = await uploadToStorage(file);
+    if (!uploaded.ok) return uploaded;
+    return postExtract({
+      storagePath: uploaded.path,
+      mediaType,
+      filename: file.name,
+    });
   }
 
   return {

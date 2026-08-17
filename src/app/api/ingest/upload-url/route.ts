@@ -44,5 +44,9 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ path: data.path, token: data.token });
+  return NextResponse.json({
+    path: data.path,
+    token: data.token,
+    signedUrl: data.signedUrl,
+  });
 }
