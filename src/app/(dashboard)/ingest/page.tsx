@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFundOS } from "@/providers/FundOSProvider";
+import { useIngestJobs } from "@/providers/IngestJobsProvider";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { DropZone } from "@/components/ingest/DropZone";
+import { BackgroundJobs } from "@/components/ingest/BackgroundJobs";
 import { ReviewTable } from "@/components/ingest/ReviewTable";
-import { ingestFile } from "@/lib/ingest/ingest-file";
 import { existingCompanyId, founderAlreadyExists } from "@/lib/ingest/commit";
 import type { FundOSData } from "@/lib/types";
 import type {
@@ -32,7 +33,7 @@ function toDrafts(
   // re-create them). Extracted lots start unchecked so the user picks their own
   // fund's lot from a multi-investor round. Everything else starts checked.
   for (const c of entities.companies) {
-    const existing = existingCompanyId(current, c.legal_name) != null;
+    const existing = existingCompanyId(current, c) != null;
     out.push({ id: nextId(), kind: "company", data: c, provenance: prov, existing, include: !existing });
   }
   for (const f of entities.founders) {
@@ -62,37 +63,40 @@ function fromDrafts(drafts: DraftRecord[]): ExtractedEntities {
 
 export default function IngestPage() {
   const { data, commitDrafts } = useFundOS();
+  const { jobs, enqueue, markConsumed } = useIngestJobs();
   const [drafts, setDrafts] = useState<DraftRecord[]>([]);
-  const [busy, setBusy] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<CommitSummary | null>(null);
 
-  async function handleFiles(files: File[]) {
-    setBusy(true);
+  function handleFiles(files: File[]) {
     setError(null);
     setSummary(null);
-    // Read all dropped files in parallel — extraction is I/O-bound (one API
-    // call per doc), so N docs take ~1 doc's time instead of N×.
-    const results = await Promise.all(
-      files.map(async (file) => ({ file, result: await ingestFile(file) }))
+    // Hand files to the background service — extraction runs off the render
+    // path so the user can keep working while decks/sheets process.
+    enqueue(files, { autoCommit: false });
+  }
+
+  // Pull finished background jobs into the review queue as they complete.
+  useEffect(() => {
+    const ready = jobs.filter(
+      (j) => j.status === "ready" && !j.consumed && j.entities && j.method,
     );
+    if (ready.length === 0) return;
     const collected: DraftRecord[] = [];
-    const errors: string[] = [];
-    for (const { file, result } of results) {
-      if (result.ok) {
-        const prov: Provenance = { source: file.name, method: result.method };
-        const produced = toDrafts(result.entities, prov, data);
-        if (produced.length === 0) errors.push(`${file.name}: no records found.`);
-        collected.push(...produced);
-      } else {
-        errors.push(result.error);
-      }
+    const emptyFiles: string[] = [];
+    for (const job of ready) {
+      const prov: Provenance = { source: job.fileName, method: job.method! };
+      const produced = toDrafts(job.entities!, prov, data);
+      if (produced.length === 0) emptyFiles.push(job.fileName);
+      collected.push(...produced);
+      markConsumed(job.id);
     }
     if (collected.length > 0) setDrafts((prev) => [...prev, ...collected]);
-    if (errors.length > 0) setError(errors.join(" "));
-    setBusy(false);
-  }
+    if (emptyFiles.length > 0) {
+      setError(`No records found in: ${emptyFiles.join(", ")}.`);
+    }
+  }, [jobs, data, markConsumed]);
 
   async function handleCommit() {
     setCommitting(true);
@@ -113,11 +117,13 @@ export default function IngestPage() {
     <>
       <PageHeader
         title="Ingest"
-        description="Drop a portfolio sheet (CSV/XLSX) or a deck / term sheet (PDF/image). Records land here as drafts to review before they're committed."
+        description="Drop a portfolio sheet (CSV/XLSX) or a deck / term sheet (PDF/image). Files process in the background; records land here as drafts to review before they're committed."
       />
 
       <div className="flex flex-col gap-4">
-        <DropZone onFiles={handleFiles} busy={busy} />
+        <DropZone onFiles={handleFiles} busy={false} />
+
+        <BackgroundJobs />
 
         {error && (
           <p className="rounded border border-loss/30 bg-loss/5 px-3 py-2 text-2xs text-loss">
@@ -128,7 +134,8 @@ export default function IngestPage() {
         {summary && (
           <p className="rounded border border-gain/30 bg-gain/5 px-3 py-2 text-2xs text-ink">
             Committed: <strong>{summary.companiesCreated}</strong> new companies (
-            {summary.companiesReused} already existed), <strong>{summary.lots}</strong> lots,{" "}
+            {summary.companiesReused} already existed), <strong>{summary.lots}</strong> lots
+            {summary.lotsReused > 0 ? ` (${summary.lotsReused} duplicates skipped)` : ""},{" "}
             <strong>{summary.founders}</strong> founders (
             {summary.foundersReused} already existed), <strong>{summary.marks}</strong> marks
             {summary.skipped > 0 ? ` · ${summary.skipped} skipped` : ""}.
