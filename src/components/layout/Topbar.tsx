@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/Badge";
 import { UserMenu } from "@/components/layout/UserMenu";
+import type { SaveStatus } from "@/providers/FundOSProvider";
 
 export interface SearchItem {
   id: string;
@@ -18,9 +19,13 @@ export interface SearchItem {
 export function Topbar({
   searchItems,
   asOf,
+  saveStatus = "idle",
+  onRetrySave,
 }: {
   searchItems: SearchItem[];
   asOf: string;
+  saveStatus?: SaveStatus;
+  onRetrySave?: () => void;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -150,16 +155,92 @@ export function Topbar({
           <span className="tnum text-[13px] font-medium text-ink">{asOf}</span>
         </div>
         <div className="h-6 w-px bg-line" />
-        <div className="flex items-center gap-1.5">
-          <span className="relative flex h-2 w-2" aria-hidden>
-            <span className="absolute inline-flex h-full w-full animate-live-ping rounded-full bg-gain" />
-            <span className="relative inline-flex h-2 w-2 animate-live-soft rounded-full bg-gain shadow-[0_0_6px_rgba(15,123,77,0.55)]" />
-          </span>
-          <span className="text-2xs text-ink-muted">Live</span>
-        </div>
+        <SaveStatusChip status={saveStatus} onRetry={onRetrySave} />
         <div className="h-6 w-px bg-line" />
         <UserMenu />
       </div>
     </header>
+  );
+}
+
+function SaveStatusChip({
+  status,
+  onRetry,
+}: {
+  status: SaveStatus;
+  onRetry?: () => void;
+}) {
+  const label =
+    status === "saving"
+      ? "Saving…"
+      : status === "saved"
+        ? "Saved"
+        : status === "error"
+          ? "Save failed"
+          : "Live";
+  const color =
+    status === "saving"
+      ? "bg-warn"
+      : status === "error"
+        ? "bg-loss"
+        : "bg-gain";
+  const text =
+    status === "saving"
+      ? "text-warn"
+      : status === "error"
+        ? "text-loss"
+        : "text-ink-muted";
+  const ping = status === "saving" || status === "idle";
+  const title =
+    status === "saving"
+      ? "Changes are still being saved — wait before refreshing."
+      : status === "error"
+        ? "Last save did not reach the server. Click to retry."
+        : status === "saved"
+          ? "All changes saved."
+          : "Live — synced with the shared database.";
+
+  const inner = (
+    <>
+      <span className="relative flex h-2 w-2" aria-hidden>
+        {ping && (
+          <span
+            className={cn(
+              "absolute inline-flex h-full w-full animate-live-ping rounded-full",
+              color,
+            )}
+          />
+        )}
+        <span
+          className={cn(
+            "relative inline-flex h-2 w-2 rounded-full",
+            color,
+            status === "idle" &&
+              "animate-live-soft shadow-[0_0_6px_rgba(15,123,77,0.55)]",
+          )}
+        />
+      </span>
+      <span className={cn("text-2xs", text)}>{label}</span>
+    </>
+  );
+
+  if (status === "error") {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        title={title}
+        aria-live="polite"
+        className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-surface-subtle"
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5" title={title} aria-live="polite">
+      {inner}
+    </div>
   );
 }

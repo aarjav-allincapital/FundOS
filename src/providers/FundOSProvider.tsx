@@ -65,10 +65,16 @@ import { refreshDisplayFxRates } from "@/lib/fx/refresh-display-fx";
 import { applyEntities } from "@/lib/ingest/commit";
 import type { CommitSummary, ExtractedEntities } from "@/lib/ingest/types";
 
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
+
 interface FundOSContextValue {
   data: FundOSData;
   isLoading: boolean;
   isHydrated: boolean;
+  /** Remote persist status — used by the top-bar unsaved/saving indicator. */
+  saveStatus: SaveStatus;
+  /** Re-push the current snapshot after a failed save. */
+  retrySave: () => void;
   addCompany: (input: AddCompanyInput) => void;
   addFounder: (input: AddFounderInput) => void;
   addLot: (input: AddLotInput) => Promise<void>;
@@ -77,6 +83,17 @@ interface FundOSContextValue {
   addDeal: (input: AddDealInput) => void;
   addFxRate: (input: AddFxRateInput) => void;
   exitLot: (input: ExitLotInput) => Promise<void>;
+  /**
+   * Write off one or more lots under a company in a single action. The optional
+   * recovery amount (e.g. liquidation proceeds) is split across the selected
+   * lots by share count, so each lot's realized loss = cost − its share.
+   */
+  writeOffLots: (input: {
+    lot_ids: string[];
+    realization_date: string;
+    amount_recovered?: number;
+    notes?: string;
+  }) => Promise<void>;
   updateCompany: (input: UpdateCompanyInput) => void;
   updateFounder: (input: UpdateFounderInput) => void;
   updateFund: (input: UpdateFundInput) => void;
@@ -88,6 +105,8 @@ interface FundOSContextValue {
   updateFxRate: (input: UpdateFxRateInput) => void;
   deleteRecord: (kind: DeleteRecordKind, id: string) => void;
   commitDrafts: (entities: ExtractedEntities) => Promise<CommitSummary>;
+  /** Replace the entire working dataset (used by the JSON backup importer). */
+  importData: (next: FundOSData) => void;
   refreshDisplayFx: () => Promise<void>;
   resetData: () => void;
 }
@@ -110,6 +129,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
   const dataRef = useRef(data);
   const [isLoading, setIsLoading] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const canPersistRemote = useRef(false);
   // Last server timestamp we've seen (ms); used to detect teammate changes.
   const remoteTsRef = useRef<number>(0);
@@ -125,6 +145,9 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
           setLocalUpdatedAt(result.updatedAt);
         }
         dirtyRef.current = false;
+        setSaveStatus("saved");
+      } else {
+        setSaveStatus("error");
       }
     }),
   );
@@ -144,6 +167,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
     // resetData() with ?force=1, which bypasses this path entirely.
     if (canPersistRemote.current && hasMeaningfulData(next)) {
       dirtyRef.current = true;
+      setSaveStatus("saving");
       remoteSaver.current.schedule(next);
     }
   }, []);
@@ -204,6 +228,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       // Seed the DB only in the confirmed-empty + meaningful-local case above.
       if (okToSeed) {
         dirtyRef.current = true;
+        setSaveStatus("saving");
         remoteSaver.current.schedule(chosen);
       }
 
@@ -301,14 +326,38 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
   // very last edit always reaches Supabase.
   useEffect(() => {
     const saver = remoteSaver.current;
-    const flush = () => saver.flushNow();
-    window.addEventListener("pagehide", flush);
-    window.addEventListener("beforeunload", flush);
+    // On real page unload use the unload-safe flush (keepalive when small,
+    // synchronous otherwise) so a large last-moment edit isn't dropped.
+    const onPageHide = () => saver.flushOnUnload();
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      saver.flushOnUnload();
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
-      window.removeEventListener("pagehide", flush);
-      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      // Component unmount (SPA nav) — async flush is fine, no keepalive cap.
       saver.flushNow();
     };
+  }, []);
+
+  // Brief "Saved" flash, then return to the idle Live indicator.
+  useEffect(() => {
+    if (saveStatus !== "saved") return;
+    const t = setTimeout(() => setSaveStatus("idle"), 2000);
+    return () => clearTimeout(t);
+  }, [saveStatus]);
+
+  const retrySave = useCallback(() => {
+    if (!canPersistRemote.current || !hasMeaningfulData(dataRef.current)) return;
+    dirtyRef.current = true;
+    setSaveStatus("saving");
+    remoteSaver.current.schedule(dataRef.current);
+    remoteSaver.current.flushNow();
   }, []);
 
   const commit = useCallback(
@@ -334,6 +383,8 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
       data,
       isLoading,
       isHydrated,
+      saveStatus,
+      retrySave,
       addCompany: (input) => commit((prev) => mutateCompany(prev, input)),
       addFounder: (input) => commit((prev) => mutateFounder(prev, input)),
       addLot: async (input) => {
@@ -419,6 +470,51 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
 
         commit((prev) => mutateExitLot(prev, { ...input, fx_rate }));
       },
+      writeOffLots: async (input) => {
+        if (!can("edit_lots")) {
+          throw new Error("Only admins can add or change investment lots.");
+        }
+        const snapshot = dataRef.current;
+        const lots = snapshot.investmentLots.filter((l) =>
+          input.lot_ids.includes(l.id),
+        );
+        if (lots.length === 0) return;
+
+        // Recovery is split across the selected lots by shares held, so the
+        // derived price/share is uniform: pps = amount_recovered / totalShares.
+        const totalShares = lots.reduce(
+          (s, l) => s + (l.shares_acquired ?? 0),
+          0,
+        );
+        const recovered = input.amount_recovered ?? 0;
+        const pps = totalShares > 0 ? recovered / totalShares : 0;
+
+        // Resolve FX per lot only when something was recovered in a foreign
+        // currency — a pure total loss (pps = 0) needs no rate.
+        let next = snapshot;
+        for (const lot of lots) {
+          const fund = snapshot.funds.find((f) => f.id === lot.fund_id);
+          if (!fund) continue;
+          let fx_rate: number | undefined;
+          if (pps > 0 && lot.currency !== fund.currency) {
+            fx_rate = await resolveReportingFx(
+              next,
+              lot.currency,
+              fund.currency,
+              input.realization_date,
+            );
+          }
+          next = mutateExitLot(next, {
+            lot_id: lot.id,
+            realization_date: input.realization_date,
+            event_type: "write_off",
+            price_per_share: pps,
+            fx_rate,
+            notes: input.notes,
+          });
+        }
+        commit(() => next);
+      },
       updateCompany: (input) => commit((prev) => patchCompany(prev, input)),
       updateFounder: (input) => commit((prev) => patchFounder(prev, input)),
       updateFund: (input) => commit((prev) => patchFund(prev, input)),
@@ -486,6 +582,12 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
         commit(() => next);
         return summary;
       },
+      importData: (next) => {
+        if (!can("ingest")) {
+          throw new Error("Only admins can import a full dataset.");
+        }
+        commit(() => next);
+      },
       refreshDisplayFx,
       resetData: () => {
         const bootstrap = createBootstrapData();
@@ -495,6 +597,7 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
         // Intentional wipe → force past the server's empty-overwrite guard.
         if (canPersistRemote.current) {
           dirtyRef.current = true;
+          setSaveStatus("saving");
           void saveRemoteState(bootstrap, { force: true }).then((result) => {
             if (result.ok) {
               if (result.updatedAt != null) {
@@ -502,12 +605,15 @@ export function FundOSProvider({ children }: { children: React.ReactNode }) {
                 setLocalUpdatedAt(result.updatedAt);
               }
               dirtyRef.current = false;
+              setSaveStatus("saved");
+            } else {
+              setSaveStatus("error");
             }
           });
         }
       },
     }),
-    [data, isLoading, isHydrated, commit, refreshDisplayFx, persist, can]
+    [data, isLoading, isHydrated, saveStatus, retrySave, commit, refreshDisplayFx, persist, can]
   );
 
   return (

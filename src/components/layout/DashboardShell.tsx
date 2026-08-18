@@ -11,7 +11,7 @@ import { buildSearchIndex } from "@/lib/search";
 import { formatDate } from "@/lib/calc";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
-  const { data, isLoading } = useFundOS();
+  const { data, isLoading, saveStatus, retrySave } = useFundOS();
   const [recordModalOpen, setRecordModalOpen] = useState(false);
   const searchItems: SearchItem[] = buildSearchIndex(data);
 
@@ -39,7 +39,12 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-screen w-full overflow-hidden bg-surface-sunken">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar searchItems={searchItems} asOf={formatDate(asOf, "medium")} />
+          <Topbar
+            searchItems={searchItems}
+            asOf={formatDate(asOf, "medium")}
+            saveStatus={saveStatus}
+            onRetrySave={retrySave}
+          />
           <main className="flex-1 overflow-hidden">
             <div className="mx-auto h-full max-w-[1600px] overflow-y-auto px-4 py-5 lg:px-6">
               {isLoading ? <PageSkeleton /> : children}
