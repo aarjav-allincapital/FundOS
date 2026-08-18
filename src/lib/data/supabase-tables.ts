@@ -6,8 +6,8 @@ import { createBootstrapData } from "@/lib/data/bootstrap";
 /**
  * Relational persistence for FundOS. Each entity in FundOSData maps 1:1 to a
  * Postgres table (see migration 007). Reads select every table; writes perform
- * an atomic full-replace (delete-all → insert) per table. Column names match
- * the TypeScript field names exactly, so rows round-trip without remapping.
+ * a non-destructive full-replace (upsert all → prune extras). Column names
+ * match the TypeScript field names exactly, so rows round-trip without remapping.
  */
 
 type FundOSKey = keyof FundOSData;
@@ -118,8 +118,8 @@ const TABLES: TableSpec[] = [
     table: "valuation_marks",
     key: "valuationMarks",
     columns: [
-      "id", "company_id", "valuation_date", "valuation_type",
-      "price_per_share_local", "currency", "pre_money_local",
+      "id", "company_id", "valuation_date", "valuation_type", "mark_status",
+      "price_per_share_local", "shares", "currency", "pre_money_local",
       "post_money_local", "source", "approval_status", "approved_by", "notes",
       "event_code", "created_at",
     ],
@@ -191,32 +191,96 @@ export async function readAllTables(sb: SupabaseClient): Promise<FundOSData> {
   return result;
 }
 
+/** Pull unknown-column names out of a PostgREST/Postgres error message. */
+function missingColumnFromError(message: string): string | null {
+  // PostgREST: "Could not find the 'mark_status' column of 'valuation_marks' in the schema cache"
+  const prest = message.match(/Could not find the '([^']+)' column/i);
+  if (prest) return prest[1];
+  // Postgres: "column \"mark_status\" of relation \"valuation_marks\" does not exist"
+  const pg = message.match(/column "([^"]+)" of relation .* does not exist/i);
+  if (pg) return pg[1];
+  return null;
+}
+
 /**
- * Atomically replace all table contents with the given snapshot. Deletes every
- * row (children first) then inserts the new rows (parents first). Because there
- * are no FK constraints, this can never fail on ordering.
+ * Normalize known NOT-NULL columns that older snapshots / client payloads may
+ * carry as null (the aliases null → wipe failure mode).
+ */
+function normalizeRows(
+  table: string,
+  rows: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  if (table !== "companies") return rows;
+  return rows.map((r) => (r.aliases == null ? { ...r, aliases: [] } : r));
+}
+
+/**
+ * Upsert a table's rows, tolerating columns that don't exist in the live schema
+ * yet (e.g. migrations not applied). Progressively drop unknown columns and
+ * retry instead of failing the whole write.
+ */
+async function upsertTolerant(
+  sb: SupabaseClient,
+  table: string,
+  rows: Record<string, unknown>[],
+  columns: string[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  let cols = [...columns];
+  for (let attempt = 0; attempt <= columns.length; attempt++) {
+    const payload = rows.map((r) => toRow(r, cols));
+    const { error } = await sb.from(table).upsert(payload, { onConflict: "id" });
+    if (!error) return;
+    const missing = missingColumnFromError(error.message);
+    if (missing && cols.includes(missing) && missing !== "id") {
+      cols = cols.filter((c) => c !== missing);
+      console.warn(
+        `[writeAllTables] ${table}: column "${missing}" missing in schema — writing without it`,
+      );
+      continue;
+    }
+    throw new Error(`upsert ${table}: ${error.message}`);
+  }
+  throw new Error(`upsert ${table}: exhausted column fallbacks`);
+}
+
+/**
+ * Non-destructive full-state write.
+ *
+ * Phase 1 upserts every row (parents first). Phase 2 prunes rows that are no
+ * longer present in the snapshot (children first). Crucially, NOTHING is
+ * deleted until every upsert has succeeded — so a failing insert can never
+ * leave the database wiped.
  */
 export async function writeAllTables(
   sb: SupabaseClient,
   data: FundOSData,
 ): Promise<void> {
-  // Delete in reverse (child → parent) for tidiness.
-  for (let i = TABLES.length - 1; i >= 0; i--) {
-    const spec = TABLES[i];
-    const { error } = await sb
-      .from(spec.table)
-      .delete()
-      .neq("id", "___never_matches___");
-    if (error) throw new Error(`delete ${spec.table}: ${error.message}`);
+  const keepByTable: Record<string, string[]> = {};
+
+  // Phase 1: upsert all rows (forward order = parents before children).
+  for (const spec of TABLES) {
+    const raw = (data[spec.key] ?? []) as unknown as Record<string, unknown>[];
+    const rows = normalizeRows(spec.table, raw);
+    await upsertTolerant(sb, spec.table, rows, spec.columns);
+    keepByTable[spec.table] = rows
+      .map((r) => r.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
   }
 
-  // Insert in order (parent → child).
-  for (const spec of TABLES) {
-    const rows = (data[spec.key] ?? []) as unknown as Record<string, unknown>[];
-    if (rows.length === 0) continue;
-    const payload = rows.map((r) => toRow(r, spec.columns));
-    const { error } = await sb.from(spec.table).insert(payload);
-    if (error) throw new Error(`insert ${spec.table}: ${error.message}`);
+  // Phase 2: prune rows no longer in the snapshot (reverse order = children first).
+  for (let i = TABLES.length - 1; i >= 0; i--) {
+    const spec = TABLES[i];
+    const keep = keepByTable[spec.table] ?? [];
+    let query = sb.from(spec.table).delete();
+    if (keep.length > 0) {
+      const list = keep.map((id) => `"${id}"`).join(",");
+      query = query.not("id", "in", `(${list})`);
+    } else {
+      query = query.neq("id", "___never_matches___");
+    }
+    const { error } = await query;
+    if (error) throw new Error(`prune ${spec.table}: ${error.message}`);
   }
 }
 
