@@ -33,8 +33,13 @@ export function RecentValuationMarks({ data }: { data: FundOSData }) {
               <TD muted className="font-mono text-2xs">{m.event_code ?? "—"}</TD>
               <TD strong>{m.company?.brand_name ?? m.company?.legal_name ?? "—"}</TD>
               <TD>
-                <Badge tone={m.valuation_type === "write_off" ? "loss" : "neutral"}>
+                <Badge tone={m.valuation_type === "write_down" ? "loss" : "neutral"}>
                   {humanize(m.valuation_type)}
+                  {m.valuation_type === "external_mark" && m.mark_status
+                    ? m.mark_status === "termsheet"
+                      ? " · term sheet (open)"
+                      : " · closed"
+                    : ""}
                 </Badge>
               </TD>
               <TD num>{formatPrice(m.price_per_share_local, m.currency)}</TD>

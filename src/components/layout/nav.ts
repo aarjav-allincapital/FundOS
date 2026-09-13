@@ -6,10 +6,10 @@ import {
   Users,
   Layers,
   Camera,
-  GitBranch,
   ArrowLeftRight,
   FileText,
   UploadCloud,
+  ArrowDownUp,
   History,
   Shield,
   type LucideIcon,
@@ -48,6 +48,12 @@ export const NAV: NavGroup[] = [
         href: "/ingest",
         adminOnly: true,
       },
+      {
+        id: "data",
+        label: "Import / Export",
+        icon: ArrowDownUp,
+        href: "/data",
+      },
     ],
   },
   {
@@ -57,17 +63,6 @@ export const NAV: NavGroup[] = [
       { id: "founders", label: "Founders", icon: Users, href: "/founders" },
       { id: "lots", label: "Investment Lots", icon: Layers, href: "/lots" },
       { id: "snapshots", label: "Snapshots & Logs", icon: Camera, href: "/snapshots" },
-    ],
-  },
-  {
-    label: "Pipeline",
-    items: [
-      {
-        id: "pipeline",
-        label: "Deployment & Terms",
-        icon: GitBranch,
-        href: "/pipeline",
-      },
     ],
   },
   {

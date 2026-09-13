@@ -62,7 +62,7 @@ function scenario10() {
   const lot = lotFor(d, lastCompany(d).id);
   d = addValuationMark(d, {
     company_id: lot.company_id, valuation_date: "2026-03-01",
-    valuation_type: "internal_mark", price_per_share_local: 200,
+    valuation_type: "external_mark", price_per_share_local: 200,
   });
   d = exitLot(d, {
     lot_id: lot.id, realization_date: "2026-06-01",
@@ -120,7 +120,7 @@ function scenario13() {
   const lot = lotFor(d, co.id);
   d = addValuationMark(d, {
     company_id: co.id, valuation_date: "2026-03-01",
-    valuation_type: "internal_mark", price_per_share_local: 150,
+    valuation_type: "external_mark", price_per_share_local: 150,
   });
   check("has snapshots before", d.positionSnapshots.length > 0);
 

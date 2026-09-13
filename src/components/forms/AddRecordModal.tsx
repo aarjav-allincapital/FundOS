@@ -10,19 +10,17 @@ import { CashInvestedField } from "@/components/forms/CashInvestedField";
 import { DateInput } from "@/components/forms/form-ui";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
 import { suggestCompanyAbbr } from "@/lib/calc/abbr";
-import { faviconUrlFromWebsite } from "@/lib/company-logo";
 import { newCompanyId, syncCompanyLogo } from "@/lib/company-logo-sync";
 import { FaviconPreview } from "@/components/forms/FaviconPreview";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
-import type { DealSource, DealStage, InstrumentType, ValuationType } from "@/lib/types";
+import type { InstrumentType, MarkStatus, ValuationMark, ValuationType } from "@/lib/types";
+import { markReprices } from "@/lib/data/valuation";
 
 export type AddRecordMode =
   | "company"
   | "founder"
   | "lot"
   | "valuation"
-  | "exit"
-  | "deal";
+  | "exit";
 
 const ALL_MODES: { id: AddRecordMode; label: string }[] = [
   { id: "company", label: "Company" },
@@ -30,7 +28,6 @@ const ALL_MODES: { id: AddRecordMode; label: string }[] = [
   { id: "lot", label: "Investment Lot" },
   { id: "valuation", label: "Valuation Mark" },
   { id: "exit", label: "Exit" },
-  { id: "deal", label: "Deal" },
 ];
 
 export function AddRecordModal({
@@ -149,6 +146,7 @@ export function AddRecordModal({
           {mode === "valuation" && can("edit_valuation_marks") && (
             <ValuationForm
               companies={ctx.data.companies}
+              valuationMarks={ctx.data.valuationMarks}
               saving={saving}
               onSubmit={(v) => runAsync(() => ctx.addValuationMark(v))}
             />
@@ -159,15 +157,7 @@ export function AddRecordModal({
               companies={ctx.data.companies}
               saving={saving}
               onSubmit={(v) => runAsync(() => ctx.exitLot(v))}
-            />
-          )}
-          {mode === "deal" && (
-            <DealForm
-              funds={ctx.data.funds}
-              onSubmit={(v) => {
-                ctx.addDeal(v);
-                onClose();
-              }}
+              onWriteOff={(v) => runAsync(() => ctx.writeOffLots(v))}
             />
           )}
         </div>
@@ -228,6 +218,7 @@ function CompanyForm({
     hq_country?: string;
     operating_currency: string;
     abbr?: string;
+    aliases?: string[];
     website?: string | null;
     logo_url?: string | null;
   }) => void;
@@ -258,12 +249,8 @@ function CompanyForm({
         setSyncing(true);
         try {
           if (websiteTrimmed) {
-            if (isSupabaseConfigured()) {
-              companyId = newCompanyId();
-              logo_url = await syncCompanyLogo(companyId, websiteTrimmed, previewLabel || undefined);
-            } else {
-              logo_url = faviconUrlFromWebsite(websiteTrimmed);
-            }
+            companyId = newCompanyId();
+            logo_url = await syncCompanyLogo(companyId, websiteTrimmed, previewLabel || undefined);
           }
 
           onSubmit({
@@ -275,6 +262,10 @@ function CompanyForm({
             hq_country: String(fd.get("hq_country") || "") || undefined,
             operating_currency: String(fd.get("currency") || "INR"),
             abbr: abbr || undefined,
+            aliases: String(fd.get("aliases") || "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
             website: websiteTrimmed,
             logo_url,
           });
@@ -319,6 +310,13 @@ function CompanyForm({
             setAbbr(next);
             setAbbrManual(next.length > 0);
           }}
+        />
+      </Field>
+      <Field label="Aliases / Previous Names">
+        <input
+          name="aliases"
+          className={inputClass}
+          placeholder="Super Living, SLR (comma-separated)"
         />
       </Field>
       <Field label="Sector">
@@ -620,6 +618,7 @@ function LotForm({
 
 function ValuationForm({
   companies,
+  valuationMarks,
   saving,
   onSubmit,
 }: {
@@ -629,18 +628,41 @@ function ValuationForm({
     legal_name: string;
     operating_currency: string;
   }[];
+  valuationMarks: ValuationMark[];
   saving?: boolean;
   onSubmit: (v: {
     company_id: string;
     valuation_date: string;
     valuation_type: ValuationType;
+    mark_status?: MarkStatus | null;
     price_per_share_local: number;
+    shares?: number;
+    pre_money_local?: number;
     post_money_local?: number;
   }) => void;
 }) {
   const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
+  const [markType, setMarkType] = useState<ValuationType>("entry_round");
+  const [markStatus, setMarkStatus] = useState<MarkStatus>("closed");
   const selectedCompany = companies.find((c) => c.id === companyId);
   const ccy = selectedCompany?.operating_currency ?? "INR";
+  const isExternal = markType === "external_mark";
+  const isImpairment = markType === "write_down";
+  const isTermsheetOpen = isExternal && markStatus === "termsheet";
+  // Priced from an SHA: entry round, or a closed external round.
+  const isPriced = markType === "entry_round" || (isExternal && markStatus === "closed");
+
+  // Post-money of the LAST closed round (shown as context for an open term
+  // sheet). Term-sheet marks don't reprice, so they're excluded here.
+  const lastRoundPostMoney = valuationMarks
+    .filter(
+      (m) =>
+        m.company_id === companyId &&
+        m.post_money_local != null &&
+        markReprices(m.valuation_type, m.mark_status),
+    )
+    .sort((a, b) => (a.valuation_date < b.valuation_date ? 1 : -1))[0]
+    ?.post_money_local;
 
   return (
     <form
@@ -650,9 +672,15 @@ function ValuationForm({
         onSubmit({
           company_id: String(fd.get("company_id")),
           valuation_date: String(fd.get("date")),
-          valuation_type: String(fd.get("type")) as ValuationType,
-          price_per_share_local: Number(fd.get("pps")),
-          post_money_local: Number(fd.get("post_money")) || undefined,
+          valuation_type: markType,
+          mark_status: isExternal ? markStatus : null,
+          // A term sheet on an open round has no final price yet.
+          price_per_share_local: isTermsheetOpen ? 0 : Number(fd.get("pps")),
+          shares: isPriced ? Number(fd.get("shares")) || undefined : undefined,
+          pre_money_local: Number(fd.get("pre_money")) || undefined,
+          post_money_local: isTermsheetOpen
+            ? undefined
+            : Number(fd.get("post_money")) || undefined,
         });
       }}
     >
@@ -676,30 +704,92 @@ function ValuationForm({
         <DateInput name="date" required />
       </Field>
       <Field label="Type *">
-        <select name="type" className={inputClass} defaultValue="internal_mark">
-          <SelectOptions
-            values={[
-              "internal_mark",
-              "round_pricing",
-              "external_mark",
-              "write_down",
-              "write_off",
-            ] as ValuationType[]}
-          />
+        <select
+          name="type"
+          className={inputClass}
+          value={markType}
+          onChange={(e) => setMarkType(e.target.value as ValuationType)}
+        >
+          <option value="entry_round">Entry round (we lead)</option>
+          <option value="external_mark">External mark</option>
+          <option value="write_down">Write-down</option>
         </select>
       </Field>
-      <Field label={`Price / Share (${ccy}) *`}>
-        <input name="pps" type="number" step="any" required className={inputClass} />
-      </Field>
-      <Field label={`Post-Money (${ccy})`}>
-        <input name="post_money" type="number" step="any" className={inputClass} />
-      </Field>
-      <p className="mb-2 text-2xs text-ink-faint">
-        Price is entered in the company&apos;s operating currency ({ccy}) —
-        the same currency its investment lots use. Fetches reporting FX for
-        the valuation date and creates position snapshots for all active
-        lots in this company.
-      </p>
+
+      {isExternal && (
+        <div className="mb-3 rounded border border-line bg-surface-subtle p-2.5">
+          <div className="mb-2 text-2xs font-semibold uppercase tracking-wide text-ink-faint">
+            External mark
+          </div>
+          <Field label="Round status *">
+            <select
+              className={inputClass}
+              value={markStatus}
+              onChange={(e) => setMarkStatus(e.target.value as MarkStatus)}
+            >
+              <option value="termsheet">Term sheet — round open</option>
+              <option value="closed">Round closed</option>
+            </select>
+          </Field>
+        </div>
+      )}
+
+      {/* Term sheet, round open: pre-money of THIS round + post-money of the
+          LAST round (shown for context). No final price yet. */}
+      {isTermsheetOpen && (
+        <>
+          <Field label={`Pre-Money — this round (${ccy}) *`}>
+            <input name="pre_money" type="number" step="any" required className={inputClass} />
+          </Field>
+          <Field label={`Post-Money — last round (${ccy})`}>
+            <input
+              readOnly
+              value={
+                lastRoundPostMoney != null
+                  ? lastRoundPostMoney.toLocaleString()
+                  : "— no prior closed round"
+              }
+              className={`${inputClass} bg-surface-subtle text-ink-muted`}
+            />
+          </Field>
+          <p className="mb-2 text-2xs text-ink-faint">
+            Round is open — recorded for reference only. It does not move NAV
+            until you switch it to “Round closed”.
+          </p>
+        </>
+      )}
+
+      {/* Priced round (entry / closed external): price + shares from the SHA. */}
+      {isPriced && (
+        <>
+          <Field label={`Price / Share (${ccy}) *`}>
+            <input name="pps" type="number" step="any" required className={inputClass} />
+          </Field>
+          <Field label="Number of Shares (from SHA)">
+            <input name="shares" type="number" step="any" className={inputClass} />
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label={`Pre-Money (${ccy})`}>
+              <input name="pre_money" type="number" step="any" className={inputClass} />
+            </Field>
+            <Field label={`Post-Money (${ccy})`}>
+              <input name="post_money" type="number" step="any" className={inputClass} />
+            </Field>
+          </div>
+          <p className="mb-2 text-2xs text-ink-faint">
+            Price / share and shares come from the SHA. Fetches reporting FX and
+            reprices position snapshots for all active lots in this company.
+          </p>
+        </>
+      )}
+
+      {/* Write-down: just the impaired price. */}
+      {isImpairment && (
+        <Field label={`Price / Share (${ccy}) *`}>
+          <input name="pps" type="number" step="any" required className={inputClass} />
+        </Field>
+      )}
+
       <Submit label="Add Valuation Mark" saving={saving} />
     </form>
   );
@@ -710,6 +800,7 @@ function ExitForm({
   companies,
   saving,
   onSubmit,
+  onWriteOff,
 }: {
   lots: {
     id: string;
@@ -729,6 +820,12 @@ function ExitForm({
     price_per_share?: number;
     notes?: string;
   }) => void;
+  onWriteOff: (v: {
+    lot_ids: string[];
+    realization_date: string;
+    amount_recovered?: number;
+    notes?: string;
+  }) => void;
 }) {
   const openLots = lots.filter(
     (l) => l.status === "active" || l.status === "partial_exit"
@@ -745,47 +842,56 @@ function ExitForm({
   const ccy = selectedLot?.currency ?? "INR";
   const isWriteOff = eventType === "write_off";
 
+  // Write-off is company-scoped: pick the company, tick the lots to write off,
+  // and enter what (if anything) was recovered. Price/share is derived.
+  const companiesWithOpenLots = companies.filter((c) =>
+    openLots.some((l) => l.company_id === c.id)
+  );
+  const [woCompanyId, setWoCompanyId] = useState(
+    companiesWithOpenLots[0]?.id ?? ""
+  );
+  const woLots = openLots.filter((l) => l.company_id === woCompanyId);
+  const [woLotIds, setWoLotIds] = useState<string[]>([]);
+  const [recovered, setRecovered] = useState<string>("");
+  const woCcy = woLots[0]?.currency ?? "INR";
+  const selectedWoLots = woLots.filter((l) => woLotIds.includes(l.id));
+  const woTotalShares = selectedWoLots.reduce(
+    (s, l) => s + (l.shares_acquired ?? 0),
+    0
+  );
+  const derivedPps =
+    woTotalShares > 0 ? (Number(recovered) || 0) / woTotalShares : 0;
+
+  function toggleWoLot(id: string) {
+    setWoLotIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
+        if (isWriteOff) {
+          onWriteOff({
+            lot_ids: woLotIds,
+            realization_date: String(fd.get("date")),
+            amount_recovered: Number(fd.get("recovered")) || 0,
+            notes: String(fd.get("notes") || "") || undefined,
+          });
+          return;
+        }
         onSubmit({
           lot_id: String(fd.get("lot_id")),
           realization_date: String(fd.get("date")),
           event_type: eventType,
           shares_sold: Number(fd.get("shares")) || undefined,
-          price_per_share: isWriteOff ? 0 : Number(fd.get("pps")) || undefined,
+          price_per_share: Number(fd.get("pps")) || undefined,
           notes: String(fd.get("notes") || "") || undefined,
         });
       }}
     >
-      <Field label="Lot *">
-        <select
-          name="lot_id"
-          required
-          className={inputClass}
-          value={lotId}
-          onChange={(e) => {
-            const nextId = e.target.value;
-            setLotId(nextId);
-            const lot = openLots.find((l) => l.id === nextId);
-            setSharesSold(
-              lot?.shares_acquired != null ? String(lot.shares_acquired) : ""
-            );
-          }}
-        >
-          <option value="">Select…</option>
-          {openLots.map((l) => {
-            const c = companies.find((x) => x.id === l.company_id);
-            return (
-              <option key={l.id} value={l.id}>
-                {l.code} — {c?.brand_name ?? c?.legal_name}
-              </option>
-            );
-          })}
-        </select>
-      </Field>
       <Field label="Event *">
         <select
           name="event_type"
@@ -802,9 +908,87 @@ function ExitForm({
           <option value="write_off">Write-off</option>
         </select>
       </Field>
+
+      {!isWriteOff && (
+        <Field label="Lot *">
+          <select
+            name="lot_id"
+            required
+            className={inputClass}
+            value={lotId}
+            onChange={(e) => {
+              const nextId = e.target.value;
+              setLotId(nextId);
+              const lot = openLots.find((l) => l.id === nextId);
+              setSharesSold(
+                lot?.shares_acquired != null ? String(lot.shares_acquired) : ""
+              );
+            }}
+          >
+            <option value="">Select…</option>
+            {openLots.map((l) => {
+              const c = companies.find((x) => x.id === l.company_id);
+              return (
+                <option key={l.id} value={l.id}>
+                  {l.code} — {c?.brand_name ?? c?.legal_name}
+                </option>
+              );
+            })}
+          </select>
+        </Field>
+      )}
+
+      {isWriteOff && (
+        <>
+          <Field label="Company *">
+            <select
+              className={inputClass}
+              value={woCompanyId}
+              onChange={(e) => {
+                setWoCompanyId(e.target.value);
+                setWoLotIds([]);
+              }}
+            >
+              <option value="">Select…</option>
+              {companiesWithOpenLots.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.brand_name ?? c.legal_name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Lots to write off *">
+            <div className="flex flex-col gap-1 rounded border border-line p-2">
+              {woLots.length === 0 && (
+                <span className="text-2xs text-ink-faint">
+                  No open lots for this company.
+                </span>
+              )}
+              {woLots.map((l) => (
+                <label
+                  key={l.id}
+                  className="flex items-center gap-2 text-[13px] text-ink"
+                >
+                  <input
+                    type="checkbox"
+                    checked={woLotIds.includes(l.id)}
+                    onChange={() => toggleWoLot(l.id)}
+                  />
+                  <span className="font-medium">{l.code}</span>
+                  <span className="text-ink-faint">
+                    · {(l.shares_acquired ?? 0).toLocaleString()} shares
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Field>
+        </>
+      )}
+
       <Field label="Realization Date *">
         <DateInput name="date" required />
       </Field>
+
       {!isWriteOff && (
         <>
           <Field label="Shares Sold *">
@@ -823,118 +1007,54 @@ function ExitForm({
           </Field>
         </>
       )}
+
+      {isWriteOff && (
+        <Field label={`Amount Recovered (${woCcy})`}>
+          <input
+            name="recovered"
+            type="number"
+            step="any"
+            min="0"
+            placeholder="0 — total loss"
+            value={recovered}
+            onChange={(e) => setRecovered(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+      )}
+
       <Field label="Notes">
         <input name="notes" className={inputClass} />
       </Field>
-      <p className="mb-2 text-2xs text-ink-faint">
-        {isWriteOff
-          ? "Write-off records zero proceeds and marks the lot written off."
-          : "Records realized proceeds in the lot’s currency and converts to the fund currency using reporting FX. Feeds DPI and gross MOIC."}
-      </p>
-      <Submit label="Record Exit" saving={saving} />
-    </form>
-  );
-}
 
-function DealForm({
-  funds,
-  onSubmit,
-}: {
-  funds: { id: string; code: string; vehicle_code: string; name: string }[];
-  onSubmit: (v: {
-    fund_id: string;
-    company_name: string;
-    stage: DealStage;
-    source: DealSource;
-    deal_owner?: string;
-    deal_lead?: string;
-    expected_investment: number;
-    currency: string;
-    expected_close_date?: string;
-  }) => void;
-}) {
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const fd = new FormData(e.currentTarget);
-        onSubmit({
-          fund_id: String(fd.get("fund_id")),
-          company_name: String(fd.get("company_name")),
-          stage: String(fd.get("stage")) as DealStage,
-          source: String(fd.get("source")) as DealSource,
-          deal_owner: String(fd.get("owner") || "") || undefined,
-          deal_lead: String(fd.get("lead") || "") || undefined,
-          expected_investment: Number(fd.get("amount")),
-          currency: String(fd.get("currency")),
-          expected_close_date: String(fd.get("close") || "") || undefined,
-        });
-      }}
-    >
-      <Field label="Company / Deal Name *">
-        <input name="company_name" required className={inputClass} />
-      </Field>
-      <Field label="Fund *">
-        <select name="fund_id" required className={inputClass}>
-          {funds.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.vehicle_code === "F1"
-                ? "Fund 1 (USD)"
-                : f.vehicle_code === "F2"
-                  ? "Fund 2 (INR)"
-                  : f.name}{" "}
-              ({f.code})
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Stage *">
-        <select name="stage" className={inputClass} defaultValue="sourcing">
-          <SelectOptions
-            values={[
-              "sourcing",
-              "first_call",
-              "second_call",
-              "investment_committee",
-              "closing",
-            ] as DealStage[]}
-          />
-        </select>
-      </Field>
-      <Field label="Source *">
-        <select name="source" className={inputClass} defaultValue="inbound">
-          <SelectOptions
-            values={[
-              "inbound",
-              "outbound",
-              "partner_referral",
-              "internal_lead",
-              "external_lead",
-            ] as DealSource[]}
-          />
-        </select>
-      </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Deal Owner">
-          <input name="owner" className={inputClass} />
-        </Field>
-        <Field label="Deal Lead">
-          <input name="lead" className={inputClass} />
-        </Field>
-      </div>
-      <Field label="Expected Investment *">
-        <input name="amount" type="number" required className={inputClass} />
-      </Field>
-      <Field label="Currency *">
-        <select name="currency" className={inputClass} defaultValue="INR">
-          <option value="INR">INR</option>
-          <option value="USD">USD</option>
-        </select>
-      </Field>
-      <Field label="Expected Close">
-        <DateInput name="close" />
-      </Field>
-      <Submit label="Add Deal" />
+      {isWriteOff ? (
+        <p className="mb-2 text-2xs text-ink-faint">
+          Writes off {selectedWoLots.length || "the selected"} lot
+          {selectedWoLots.length === 1 ? "" : "s"}
+          {woTotalShares > 0
+            ? ` (${woTotalShares.toLocaleString()} shares)`
+            : ""}
+          . Any amount recovered is split across the lots by shares, so the
+          derived exit price is{" "}
+          <strong>
+            {derivedPps.toLocaleString(undefined, {
+              maximumFractionDigits: 4,
+            })}{" "}
+            {woCcy}/share
+          </strong>
+          . The rest of each lot&apos;s cost basis becomes a realized loss.
+        </p>
+      ) : (
+        <p className="mb-2 text-2xs text-ink-faint">
+          Records realized proceeds in the lot’s currency and converts to the
+          fund currency using reporting FX. Feeds DPI and gross MOIC.
+        </p>
+      )}
+
+      <Submit
+        label={isWriteOff ? "Record Write-off" : "Record Exit"}
+        saving={saving}
+      />
     </form>
   );
 }

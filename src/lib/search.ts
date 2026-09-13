@@ -46,17 +46,6 @@ export function buildSearchIndex(data: FundOSData): SearchItem[] {
     });
   }
 
-  for (const d of data.deals) {
-    const c = data.companies.find((x) => x.id === d.company_id);
-    items.push({
-      id: `deal-${d.id}`,
-      label: c?.brand_name ?? d.notes?.split(" — ")[0] ?? "Deal",
-      sublabel: `${d.stage.replace(/_/g, " ")} · ${d.deal_lead ?? ""}`,
-      kind: "Deal",
-      href: "/pipeline",
-    });
-  }
-
   for (const f of data.founders) {
     const c = data.companies.find((x) => x.id === f.company_id);
     items.push({

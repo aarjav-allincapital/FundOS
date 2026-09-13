@@ -13,26 +13,23 @@ const config: Config = {
         mono: ["var(--font-jakarta)", "system-ui", "sans-serif"],
       },
       colors: {
-        // Institutional neutral scale — near-black on white
         ink: {
-          DEFAULT: "#0A0A0A",
-          muted: "#525252",
-          faint: "#8A8A8A",
+          DEFAULT: "rgb(var(--ink) / <alpha-value>)",
+          muted: "rgb(var(--ink-muted) / <alpha-value>)",
+          faint: "rgb(var(--ink-faint) / <alpha-value>)",
         },
         line: {
-          DEFAULT: "#E7E7E7",
-          strong: "#D4D4D4",
+          DEFAULT: "rgb(var(--line) / <alpha-value>)",
+          strong: "rgb(var(--line-strong) / <alpha-value>)",
         },
         surface: {
-          DEFAULT: "#FFFFFF",
-          subtle: "#FAFAFA",
-          sunken: "#F4F4F4",
+          DEFAULT: "rgb(var(--surface) / <alpha-value>)",
+          subtle: "rgb(var(--surface-subtle) / <alpha-value>)",
+          sunken: "rgb(var(--surface-sunken) / <alpha-value>)",
         },
-        // Brand — All In Capital red, used for report/reporting accents
         brand: {
           red: "#F0524B",
         },
-        // Semantic — used sparingly, only for meaning
         gain: "#0F7B4D",
         loss: "#B42318",
         warn: "#B54708",
@@ -48,8 +45,8 @@ const config: Config = {
         md: "8px",
       },
       boxShadow: {
-        card: "0 1px 2px 0 rgba(10,10,10,0.04)",
-        pop: "0 8px 24px -6px rgba(10,10,10,0.12)",
+        card: "var(--shadow-card)",
+        pop: "var(--shadow-pop)",
       },
       keyframes: {
         "live-ping": {

@@ -75,7 +75,7 @@ function scenario1() {
   d = addValuationMark(d, {
     company_id: co.id,
     valuation_date: "2026-03-01",
-    valuation_type: "internal_mark",
+    valuation_type: "external_mark",
     price_per_share_local: 150,
   });
   let p = posFor(d, lot.id);
@@ -128,7 +128,7 @@ function scenario2() {
   d = addValuationMark(d, {
     company_id: co.id,
     valuation_date: "2026-03-01",
-    valuation_type: "internal_mark",
+    valuation_type: "external_mark",
     price_per_share_local: 150,
     reporting_fx: inrToUsd(0.012),
   });
@@ -140,7 +140,7 @@ function scenario2() {
   d = addValuationMark(d, {
     company_id: co.id,
     valuation_date: "2026-06-01",
-    valuation_type: "internal_mark",
+    valuation_type: "external_mark",
     price_per_share_local: 150,
     reporting_fx: inrToUsd(0.010),
   });
@@ -172,7 +172,7 @@ function scenario3() {
   d = addValuationMark(d, {
     company_id: co.id,
     valuation_date: "2026-06-01",
-    valuation_type: "write_off",
+    valuation_type: "write_down",
     price_per_share_local: 0,
   });
   const p = posFor(d, lot.id);
@@ -206,7 +206,7 @@ function scenario4() {
   // Mark whole company at 300/share
   d = addValuationMark(d, {
     company_id: co.id, valuation_date: "2026-03-01",
-    valuation_type: "internal_mark", price_per_share_local: 300,
+    valuation_type: "external_mark", price_per_share_local: 300,
   });
   const roll = companyRollup(d, co);
   // FMV: (1000+500)*300 = 450000 ; cost 200000 → 2.25x
@@ -234,7 +234,7 @@ function scenario5() {
   check("entry fx = 1", approx(lot.fx_rate_at_entry, 1));
   d = addValuationMark(d, {
     company_id: co.id, valuation_date: "2026-03-01",
-    valuation_type: "round_pricing", price_per_share_local: 25,
+    valuation_type: "entry_round", price_per_share_local: 25,
   });
   const p = posFor(d, lot.id);
   check("markup FMV = 25000 USD", approx(p.fmvFund, 25_000), `got ${p.fmvFund}`);

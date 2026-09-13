@@ -10,7 +10,6 @@ import { useAuth } from "@/providers/AuthProvider";
 const MODE_TO_KIND: Partial<Record<EditRecordMode, DeleteRecordKind>> = {
   company: "company",
   founder: "founder",
-  deal: "deal",
   lot: "lot",
   valuation: "valuation",
   snapshot: "snapshot",

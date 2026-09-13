@@ -43,7 +43,7 @@ function scenario14() {
   // Mark to 2x, then sell 400/1000 shares at that mark (200/share => 80k proceeds)
   d = addValuationMark(d, {
     company_id: lot.company_id, valuation_date: "2025-06-01",
-    valuation_type: "internal_mark", price_per_share_local: 200,
+    valuation_type: "external_mark", price_per_share_local: 200,
   });
   d = exitLot(d, {
     lot_id: lot.id, realization_date: "2025-09-01",
@@ -85,7 +85,7 @@ function scenario16() {
   // Now mark whole company UP to 300 — remaining 600 shares must reflect it.
   d = addValuationMark(d, {
     company_id: lot.company_id, valuation_date: "2025-09-01",
-    valuation_type: "internal_mark", price_per_share_local: 300,
+    valuation_type: "external_mark", price_per_share_local: 300,
   });
   const fm = fundMetrics(d, f2(d));
   check("NAV = 180000 (600 sh @ 300, repriced)", approx(fm.currentNav, 180_000), `got ${fm.currentNav}`);

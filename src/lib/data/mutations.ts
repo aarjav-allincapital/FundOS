@@ -13,6 +13,7 @@ import type {
   PositionSnapshot,
   ValuationMark,
   ValuationType,
+  MarkStatus,
   DealStage,
   DealSource,
 } from "@/lib/types";
@@ -20,6 +21,7 @@ import { buildSnapshot } from "@/lib/calc/snapshot";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
 import { resolveFxRate } from "@/lib/calc/fx";
 import { suggestCompanyAbbr } from "@/lib/calc/abbr";
+import { markReprices } from "@/lib/data/valuation";
 import {
   findDuplicateInvestmentLot,
   mergedCompanyAliases,
@@ -319,7 +321,12 @@ export interface AddValuationMarkInput {
   company_id: string;
   valuation_date: string;
   valuation_type: ValuationType;
+  /** Sub-status for external marks: "termsheet" (round open) | "closed". */
+  mark_status?: MarkStatus | null;
   price_per_share_local: number;
+  /** Share count from the SHA (closed / entry rounds). */
+  shares?: number;
+  pre_money_local?: number;
   post_money_local?: number;
   approval_status?: "draft" | "pending" | "approved";
   /** Pre-fetched reporting FX keyed by "FROM>TO" */
@@ -333,14 +340,23 @@ export function addValuationMark(
   const company = data.companies.find((c) => c.id === input.company_id);
   if (!company) return data;
 
+  // External marks default to a closed round; only entry/write marks have no
+  // sub-status. An explicit mark_status (e.g. "termsheet") always wins.
+  const markStatus: MarkStatus | null =
+    input.mark_status ??
+    (input.valuation_type === "external_mark" ? "closed" : null);
+  const reprices = markReprices(input.valuation_type, markStatus);
+
   const mark: ValuationMark = {
     id: id("mark"),
     company_id: input.company_id,
     valuation_date: input.valuation_date,
     valuation_type: input.valuation_type,
+    mark_status: markStatus,
     price_per_share_local: input.price_per_share_local,
+    shares: input.shares ?? null,
     currency: company.operating_currency,
-    pre_money_local: null,
+    pre_money_local: input.pre_money_local ?? null,
     post_money_local: input.post_money_local ?? null,
     source: "internal",
     approval_status: input.approval_status ?? "approved",
@@ -349,6 +365,15 @@ export function addValuationMark(
     event_code: `VE-${company.abbr}-${input.valuation_date}`,
     created_at: new Date().toISOString(),
   };
+
+  // An open-round term sheet is informational: record it, but don't reprice
+  // NAV or the company's cached price until the round closes.
+  if (!reprices) {
+    return {
+      ...data,
+      valuationMarks: [...data.valuationMarks, mark],
+    };
+  }
 
   // Partially-exited lots still hold a live position, so they must be repriced
   // by new company marks too — otherwise their NAV freezes at the exit-date mark.
@@ -575,7 +600,9 @@ export function exitLot(data: FundOSData, input: ExitLotInput): FundOSData {
   if (!fund) return data;
 
   const isWriteOff = input.event_type === "write_off";
-  const pricePerShare = isWriteOff ? 0 : input.price_per_share ?? 0;
+  // A write-off can still recover a little (e.g. liquidation proceeds); the
+  // caller passes the recovery price/share, defaulting to 0 for a total loss.
+  const pricePerShare = input.price_per_share ?? 0;
   const sharesSold = isWriteOff
     ? lot.shares_acquired ?? 0
     : input.shares_sold ?? lot.shares_acquired ?? 0;

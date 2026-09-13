@@ -305,7 +305,7 @@ async function main() {
         data = addValuationMark(data, {
           company_id: company.id,
           valuation_date: f["Close Date"],
-          valuation_type: "round_pricing",
+          valuation_type: "entry_round",
           price_per_share_local: f["Price Per Share at Entry"],
           approval_status: "approved",
         });
@@ -352,7 +352,7 @@ async function main() {
       data = addValuationMark(data, {
         company_id: company.id,
         valuation_date: ev.date,
-        valuation_type: "round_pricing",
+        valuation_type: "entry_round",
         price_per_share_local: ev.price,
         approval_status: "approved",
       });
@@ -371,7 +371,7 @@ async function main() {
       data = addValuationMark(data, {
         company_id: company.id,
         valuation_date: company.latest_mark_price_date,
-        valuation_type: "internal_mark",
+        valuation_type: "external_mark",
         price_per_share_local: company.latest_mark_price,
         approval_status: "approved",
       });

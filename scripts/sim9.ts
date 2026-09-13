@@ -120,7 +120,7 @@ function scenarioNimbusLifecycle() {
   d = addValuationMark(d, {
     company_id: nimbus.id,
     valuation_date: "2025-06-30",
-    valuation_type: "internal_mark",
+    valuation_type: "external_mark",
     price_per_share_local: 750,
     post_money_local: 1_500_000_000,
   });
@@ -151,7 +151,7 @@ function scenarioNimbusLifecycle() {
   d = addValuationMark(d, {
     company_id: nimbus.id,
     valuation_date: "2025-09-30",
-    valuation_type: "internal_mark",
+    valuation_type: "external_mark",
     price_per_share_local: 750,
     post_money_local: 2_000_000_000,
   });
@@ -211,7 +211,7 @@ function scenarioVertexFullExit() {
   d = addValuationMark(d, {
     company_id: vertex.id,
     valuation_date: "2025-12-31",
-    valuation_type: "round_pricing",
+    valuation_type: "entry_round",
     price_per_share_local: 500,
     reporting_fx: inrToUsd(0.012),
   });
@@ -391,7 +391,7 @@ function scenarioPortfolioRollup() {
   });
   d = addValuationMark(d, {
     company_id: bloom.id, valuation_date: "2026-01-01",
-    valuation_type: "internal_mark", price_per_share_local: 3,
+    valuation_type: "external_mark", price_per_share_local: 3,
   });
 
   check("4 companies in book", d.companies.length === 4);

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2, LogOut, User as UserIcon } from "lucide-react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
+import { PersonalisationPanel } from "@/components/settings/PersonalisationPanel";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/cn";
 
@@ -55,14 +56,17 @@ export default function SettingsPage() {
       </div>
 
       {!authEnabled ? (
-        <Panel>
-          <PanelBody>
-            <p className="text-[13px] text-ink-muted">
-              Authentication is not configured for this environment (running in
-              local mode).
-            </p>
-          </PanelBody>
-        </Panel>
+        <div className="flex flex-col gap-4">
+          <Panel>
+            <PanelBody>
+              <p className="text-[13px] text-ink-muted">
+                Authentication is not configured for this environment (running in
+                local mode).
+              </p>
+            </PanelBody>
+          </Panel>
+          <PersonalisationPanel />
+        </div>
       ) : (
         <div className="flex flex-col gap-4">
           <Panel>
@@ -166,6 +170,8 @@ export default function SettingsPage() {
               </div>
             </PanelBody>
           </Panel>
+
+          <PersonalisationPanel />
         </div>
       )}
     </div>

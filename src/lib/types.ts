@@ -23,11 +23,17 @@ export type LotStatus =
   | "written_off";
 
 export type ValuationType =
-  | "round_pricing"
-  | "internal_mark"
+  | "entry_round"
   | "external_mark"
-  | "write_down"
-  | "write_off";
+  | "write_down";
+
+/**
+ * Sub-status for an `external_mark`:
+ *  - "termsheet": a term sheet is out but the round is still OPEN — informational
+ *    only, it must not move NAV or the company's last-approved price.
+ *  - "closed": the round has closed at this price — it reprices NAV.
+ */
+export type MarkStatus = "termsheet" | "closed";
 
 export type DealStage =
   | "sourcing"
@@ -242,7 +248,11 @@ export interface ValuationMark {
   company_id: string;
   valuation_date: string;
   valuation_type: ValuationType;
+  /** Only meaningful when valuation_type === "external_mark". */
+  mark_status: MarkStatus | null;
   price_per_share_local: number;
+  /** Share count from the SHA — captured for closed / entry rounds. */
+  shares: number | null;
   currency: CurrencyCode;
   pre_money_local: number | null;
   post_money_local: number | null;

@@ -43,7 +43,7 @@ export const EXTRACTION_JSON_INSTRUCTION = `Respond with a single JSON object (n
 - "companies": [{ "legal_name", "brand_name", "aliases", "sector", "hq_city", "hq_country", "operating_currency", "website" }]
 - "founders": [{ "company_name", "name", "role", "email", "linkedin_url" }]
 - "lots": [{ "company_name", "investor_name", "fund_code", "round_name", "investment_date", "vehicle", "shares_acquired", "price_per_share_local", "currency", "cash_invested_local", "ownership_at_entry_pct" }] (one lot per investor named in a round; set investor_name for each)
-- "marks": [{ "company_name", "valuation_date", "price_per_share_local", "post_money_local", "valuation_type" }]
+- "marks": [{ "company_name", "valuation_date", "price_per_share_local", "shares", "pre_money_local", "post_money_local", "valuation_type" }] (valuation_type is one of: "entry_round" when we lead the round, "term_sheet" when a term sheet is out but the round is still open, "external_mark" for a closed priced round, "write_down". For a closed round, take price_per_share_local and shares from the SHA. Never emit a write-off mark — write-offs are exits, not marks.)
 String fields use null when unknown; numeric fields use null when unknown. Never invent values.`;
 
 const nullableString = { type: ["string", "null"] as const };
@@ -125,6 +125,8 @@ const markItem = {
     company_name: { type: "string" },
     valuation_date: nullableString,
     price_per_share_local: nullableNumber,
+    shares: nullableNumber,
+    pre_money_local: nullableNumber,
     post_money_local: nullableNumber,
     valuation_type: nullableString,
   },
@@ -132,6 +134,8 @@ const markItem = {
     "company_name",
     "valuation_date",
     "price_per_share_local",
+    "shares",
+    "pre_money_local",
     "post_money_local",
     "valuation_type",
   ],

@@ -3,6 +3,8 @@ import { Plus_Jakarta_Sans } from "next/font/google";
 import { FundOSProvider } from "@/providers/FundOSProvider";
 import { DisplayPreferencesProvider } from "@/providers/DisplayPreferencesProvider";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { ThemeProvider } from "@/providers/ThemeProvider";
+import { ThemeInitScript } from "@/app/theme-init";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -23,13 +25,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={jakarta.variable}>
+    <html lang="en" className={jakarta.variable} suppressHydrationWarning>
+      <head>
+        <ThemeInitScript />
+      </head>
       <body className={`${jakarta.className} font-sans antialiased`}>
-        <AuthProvider>
-          <FundOSProvider>
-            <DisplayPreferencesProvider>{children}</DisplayPreferencesProvider>
-          </FundOSProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <FundOSProvider>
+              <DisplayPreferencesProvider>{children}</DisplayPreferencesProvider>
+            </FundOSProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

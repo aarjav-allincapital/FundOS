@@ -10,7 +10,6 @@ export * from "@/lib/calc/fx";
 export * from "@/lib/calc/snapshot";
 export * from "@/lib/calc/portfolio";
 export * from "@/lib/calc/fund";
-export * from "@/lib/calc/pipeline";
 export * from "@/lib/calc/trends";
 export * from "@/lib/calc/irr";
 

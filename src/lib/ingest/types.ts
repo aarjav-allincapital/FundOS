@@ -45,6 +45,8 @@ export interface ExtractedMark {
   company_name: string;
   valuation_date?: string | null; // ISO
   price_per_share_local?: number | null;
+  shares?: number | null;
+  pre_money_local?: number | null;
   post_money_local?: number | null;
   valuation_type?: string | null;
 }

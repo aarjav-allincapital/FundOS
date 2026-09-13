@@ -17,10 +17,12 @@ import type {
   PositionSnapshot,
   ValuationMark,
   ValuationType,
+  MarkStatus,
 } from "@/lib/types";
 import { buildSnapshot } from "@/lib/calc/snapshot";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
 import { resolveFxRate } from "@/lib/calc/fx";
+import { markReprices } from "@/lib/data/valuation";
 import { storeManualFxRate, storeReportingFxRate, storeTransactionFxRate } from "@/lib/data/fx-store";
 import { pairKey } from "@/lib/fx/prepare";
 
@@ -314,7 +316,9 @@ export interface UpdateValuationMarkInput {
   id: string;
   valuation_date?: string;
   valuation_type?: ValuationType;
+  mark_status?: MarkStatus | null;
   price_per_share_local?: number;
+  shares?: number | null;
   post_money_local?: number | null;
   pre_money_local?: number | null;
   approval_status?: ApprovalStatus;
@@ -339,6 +343,8 @@ export function updateValuationMark(
 
   const valuationDate = input.valuation_date ?? existing.valuation_date;
   const price = input.price_per_share_local ?? existing.price_per_share_local;
+  const shares =
+    input.shares !== undefined ? input.shares : existing.shares;
   const postMoney =
     input.post_money_local !== undefined
       ? input.post_money_local
@@ -350,12 +356,21 @@ export function updateValuationMark(
   const approval = input.approval_status ?? existing.approval_status;
   const valuationType = input.valuation_type ?? existing.valuation_type;
   const notes = input.notes !== undefined ? input.notes : existing.notes;
+  const rawMarkStatus =
+    input.mark_status !== undefined ? input.mark_status : existing.mark_status;
+  // Keep mark_status coherent with the type: external marks default to closed;
+  // non-external types never carry a sub-status.
+  const markStatus: MarkStatus | null =
+    valuationType === "external_mark" ? rawMarkStatus ?? "closed" : null;
+  const reprices = markReprices(valuationType, markStatus);
 
   const updatedMark: ValuationMark = {
     ...existing,
     valuation_date: valuationDate,
     valuation_type: valuationType,
+    mark_status: markStatus,
     price_per_share_local: price,
+    shares,
     post_money_local: postMoney,
     pre_money_local: preMoney,
     approval_status: approval,
@@ -372,11 +387,16 @@ export function updateValuationMark(
     ),
   };
 
-  const liveLots = working.investmentLots.filter(
-    (l) =>
-      l.company_id === company.id &&
-      (l.status === "active" || l.status === "partial_exit"),
-  );
+  // An open-round term sheet doesn't reprice: drop any snapshots that were tied
+  // to this mark (e.g. it was just switched from "closed" → "termsheet") and
+  // skip the rebuild. Flipping back to "closed" repopulates them.
+  const liveLots = reprices
+    ? working.investmentLots.filter(
+        (l) =>
+          l.company_id === company.id &&
+          (l.status === "active" || l.status === "partial_exit"),
+      )
+    : [];
 
   const linkedByLot = new Map(
     working.positionSnapshots
@@ -465,7 +485,9 @@ export function updateValuationMark(
   const latestApproved = [...working.valuationMarks]
     .filter(
       (m) =>
-        m.company_id === company.id && m.approval_status === "approved",
+        m.company_id === company.id &&
+        m.approval_status === "approved" &&
+        markReprices(m.valuation_type, m.mark_status),
     )
     .sort((a, b) => (a.valuation_date < b.valuation_date ? 1 : -1))[0];
 

@@ -13,6 +13,7 @@ import type {
   Fund,
   FundOSData,
   InstrumentType,
+  MarkStatus,
   ValuationType,
 } from "@/lib/types";
 import {
@@ -63,17 +64,30 @@ function mapVehicle(raw: string | null | undefined): InstrumentType {
   return "ccps";
 }
 
-const VAL_TYPES: ValuationType[] = [
-  "round_pricing",
-  "internal_mark",
-  "external_mark",
-  "write_down",
-  "write_off",
-];
-function mapValType(raw: string | null | undefined): ValuationType {
+/**
+ * Map an extracted valuation-type string onto the taxonomy. A term sheet on an
+ * open round becomes an informational external mark; a priced/closed round (the
+ * old "round_pricing" / "internal_mark") becomes a closed external mark unless
+ * the text says we led ("entry"). Recovery of the exact intent from free text
+ * is best-effort — closed external mark is the safe default.
+ */
+function mapValType(raw: string | null | undefined): {
+  type: ValuationType;
+  status: MarkStatus | null;
+} {
   const n = norm(raw);
-  const hit = VAL_TYPES.find((v) => n === norm(v) || n.includes(norm(v)));
-  return hit ?? "internal_mark";
+  // Write-offs are recorded as exits, not valuation marks — a documented
+  // impairment/loss folds into a write_down (mark to the stated price).
+  if (/(writ.?off|wrote.?off|total.?loss|writ.?down|impair|markdown|mark.?down)/.test(n)) {
+    return { type: "write_down", status: null };
+  }
+  if (/(entry|we.?lead|lead.?invest|our.?round)/.test(n)) {
+    return { type: "entry_round", status: null };
+  }
+  if (/(term.?sheet|ts.?issued|round.?open|open.?round|pending)/.test(n)) {
+    return { type: "external_mark", status: "termsheet" };
+  }
+  return { type: "external_mark", status: "closed" };
 }
 
 /** Resolve a fund from an extracted code/vehicle, falling back to currency, then first fund. */
@@ -252,11 +266,15 @@ export async function applyEntities(
       em.valuation_date,
       fundCurrencies
     );
+    const mapped = mapValType(em.valuation_type);
     working = addValuationMark(working, {
       company_id: cid,
       valuation_date: em.valuation_date,
-      valuation_type: mapValType(em.valuation_type),
+      valuation_type: mapped.type,
+      mark_status: mapped.status,
       price_per_share_local: em.price_per_share_local,
+      shares: em.shares ?? undefined,
+      pre_money_local: em.pre_money_local ?? undefined,
       post_money_local: em.post_money_local ?? undefined,
       reporting_fx,
     });

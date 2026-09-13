@@ -50,6 +50,7 @@ COMMENT ON COLUMN valuation_marks.event_code IS 'Auto: VE-{company_abbr}-{YYYY-M
 COMMENT ON COLUMN position_snapshots.snapshot_date IS 'Snapshot capture date as YYYY-MM-DD e.g. 2024-08-29';
 COMMENT ON COLUMN position_snapshots.snapshot_code IS 'Auto: SNAP-{lot_code}-{YYYY-MM-DD}';
 
+
 -- ============================================================
 -- AUTO-GENERATE UNIQUE ABBREVIATIONS
 -- Super Living → SL | collision → SL2, SL3, ...

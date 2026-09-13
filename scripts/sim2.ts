@@ -45,7 +45,7 @@ function scenario6() {
   });
   d = addValuationMark(d, {
     company_id: us.id, valuation_date: "2026-03-01",
-    valuation_type: "round_pricing", price_per_share_local: 20,
+    valuation_type: "entry_round", price_per_share_local: 20,
   });
 
   // INR company in F2: cost 1,000,000 INR, mark to 1.5x => NAV 1,500,000 INR
@@ -59,7 +59,7 @@ function scenario6() {
   });
   d = addValuationMark(d, {
     company_id: inn.id, valuation_date: "2026-03-01",
-    valuation_type: "internal_mark", price_per_share_local: 150,
+    valuation_type: "external_mark", price_per_share_local: 150,
   });
 
   // Seed live reporting FX for display conversion (no hardcoded bootstrap rates).
