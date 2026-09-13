@@ -30,7 +30,10 @@ export async function storeCompanyLogoInSupabase(opts: {
 
   const webp = await resolveCompanyLogoWebp(opts.website, opts.label);
   const path = `${opts.companyId}.webp`;
-  const { error: upErr } = await admin.storage.from(BUCKET).upload(path, webp, {
+  // Upload as a Blob: passing a raw Node Buffer can get coerced through a
+  // UTF-8 string by the storage client, corrupting the binary.
+  const body = new Blob([new Uint8Array(webp)], { type: "image/webp" });
+  const { error: upErr } = await admin.storage.from(BUCKET).upload(path, body, {
     contentType: "image/webp",
     upsert: true,
     cacheControl: "31536000",

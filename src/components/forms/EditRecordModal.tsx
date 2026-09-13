@@ -8,16 +8,13 @@ import { Field, inputClass, Submit, DateInput } from "@/components/forms/form-ui
 import { CashInvestedField } from "@/components/forms/CashInvestedField";
 import { FaviconPreview } from "@/components/forms/FaviconPreview";
 import { calcCashInvestedLocal } from "@/lib/calc/lot";
-import { faviconUrlFromWebsite } from "@/lib/company-logo";
 import { syncCompanyLogo } from "@/lib/company-logo-sync";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
 import type {
   ApprovalStatus,
-  DealSource,
-  DealStage,
   FundOSData,
   InstrumentType,
   LotStatus,
+  MarkStatus,
   ValuationType,
 } from "@/lib/types";
 import type { UpdateLotInput } from "@/lib/data/updates";
@@ -29,7 +26,6 @@ export type EditRecordMode =
   | "lot"
   | "valuation"
   | "snapshot"
-  | "deal"
   | "fx";
 
 const TITLES: Record<EditRecordMode, string> = {
@@ -39,7 +35,6 @@ const TITLES: Record<EditRecordMode, string> = {
   lot: "Edit Investment Lot",
   valuation: "Edit Valuation Mark",
   snapshot: "Edit Snapshot",
-  deal: "Edit Deal",
   fx: "Edit FX Rate",
 };
 
@@ -159,105 +154,6 @@ export function EditRecordModal({
             );
           })()}
 
-          {mode === "deal" && (() => {
-            const d = data.deals.find((x) => x.id === recordId);
-            if (!d) return <Missing />;
-            const name = d.notes?.split(" — ")[0] ?? "";
-            return (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  const companyName = String(fd.get("company_name"));
-                  save(() =>
-                    ctx.updateDeal({
-                      id: d.id,
-                      stage: String(fd.get("stage")) as DealStage,
-                      source: String(fd.get("source")) as DealSource,
-                      deal_owner: String(fd.get("owner") || "") || null,
-                      deal_lead: String(fd.get("lead") || "") || null,
-                      expected_investment: Number(fd.get("amount")),
-                      currency: String(fd.get("currency")),
-                      expected_close_date: String(fd.get("close") || "") || null,
-                      notes: companyName ? `${companyName} — prospective investment` : d.notes,
-                    })
-                  );
-                }}
-              >
-                <Field label="Company / Deal Name *">
-                  <input name="company_name" required defaultValue={name} className={inputClass} />
-                </Field>
-                <Field label="Fund">
-                  <input
-                    readOnly
-                    value={data.funds.find((f) => f.id === d.fund_id)?.code ?? "—"}
-                    className={`${inputClass} bg-surface-subtle text-ink-muted`}
-                  />
-                </Field>
-                <Field label="Stage *">
-                  <select name="stage" defaultValue={d.stage} className={inputClass}>
-                    <SelectOptions
-                      values={[
-                        "sourcing",
-                        "first_call",
-                        "second_call",
-                        "investment_committee",
-                        "closing",
-                        "post_investment",
-                        "monitoring",
-                        "passed",
-                        "archived",
-                      ] as DealStage[]}
-                    />
-                  </select>
-                </Field>
-                <Field label="Source *">
-                  <select name="source" defaultValue={d.source ?? "inbound"} className={inputClass}>
-                    <SelectOptions
-                      values={[
-                        "inbound",
-                        "outbound",
-                        "partner_referral",
-                        "internal_lead",
-                        "external_lead",
-                      ] as DealSource[]}
-                    />
-                  </select>
-                </Field>
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Deal Owner">
-                    <input name="owner" defaultValue={d.deal_owner ?? ""} className={inputClass} />
-                  </Field>
-                  <Field label="Deal Lead">
-                    <input name="lead" defaultValue={d.deal_lead ?? ""} className={inputClass} />
-                  </Field>
-                </div>
-                <Field label="Expected Investment *">
-                  <input
-                    name="amount"
-                    type="number"
-                    required
-                    defaultValue={d.expected_investment ?? ""}
-                    className={inputClass}
-                  />
-                </Field>
-                <Field label="Currency *">
-                  <select name="currency" defaultValue={d.currency} className={inputClass}>
-                    <option value="INR">INR</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </Field>
-                <Field label="Expected Close">
-                  <DateInput
-                    name="close"
-                    defaultValue={d.expected_close_date ?? ""}
-                  />
-                </Field>
-                <Submit label="Save Changes" saving={saving} />
-              </form>
-            );
-          })()}
-
           {mode === "lot" && (
             <LotEditForm
               lotId={recordId}
@@ -276,12 +172,20 @@ export function EditRecordModal({
                 onSubmit={(e) => {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget);
+                  const valType = String(fd.get("type")) as ValuationType;
+                  const status =
+                    valType === "external_mark"
+                      ? (String(fd.get("mark_status")) as MarkStatus)
+                      : null;
                   save(() =>
                     ctx.updateValuationMark({
                       id: m.id,
                       valuation_date: String(fd.get("date")),
-                      valuation_type: String(fd.get("type")) as ValuationType,
+                      valuation_type: valType,
+                      mark_status: status,
                       price_per_share_local: Number(fd.get("pps")),
+                      shares: Number(fd.get("shares")) || null,
+                      pre_money_local: Number(fd.get("pre_money")) || null,
                       post_money_local: Number(fd.get("post_money")) || null,
                       approval_status: String(fd.get("status")) as ApprovalStatus,
                       notes: String(fd.get("notes") || "") || null,
@@ -291,8 +195,9 @@ export function EditRecordModal({
               >
                 {company && (
                   <p className="mb-3 text-2xs text-ink-muted">
-                    {company.brand_name || company.legal_name} — saving also
-                    rebuilds linked position snapshots (FMV / MOIC).
+                    {company.brand_name || company.legal_name} — saving reprices
+                    linked snapshots. Switch an external mark to “Round closed”
+                    to fold it into NAV.
                   </p>
                 )}
                 <Field label="Valuation Date *">
@@ -300,15 +205,19 @@ export function EditRecordModal({
                 </Field>
                 <Field label="Type *">
                   <select name="type" defaultValue={m.valuation_type} className={inputClass}>
-                    <SelectOptions
-                      values={[
-                        "internal_mark",
-                        "round_pricing",
-                        "external_mark",
-                        "write_down",
-                        "write_off",
-                      ] as ValuationType[]}
-                    />
+                    <option value="entry_round">Entry round (we lead)</option>
+                    <option value="external_mark">External mark</option>
+                    <option value="write_down">Write-down</option>
+                  </select>
+                </Field>
+                <Field label="Round status (external marks)">
+                  <select
+                    name="mark_status"
+                    defaultValue={m.mark_status ?? "closed"}
+                    className={inputClass}
+                  >
+                    <option value="termsheet">Term sheet — round open</option>
+                    <option value="closed">Round closed</option>
                   </select>
                 </Field>
                 <Field label={`Price / Share (${m.currency}) *`}>
@@ -321,15 +230,35 @@ export function EditRecordModal({
                     className={inputClass}
                   />
                 </Field>
-                <Field label={`Post-Money (${m.currency})`}>
+                <Field label="Number of Shares (from SHA)">
                   <input
-                    name="post_money"
+                    name="shares"
                     type="number"
                     step="any"
-                    defaultValue={m.post_money_local ?? ""}
+                    defaultValue={m.shares ?? ""}
                     className={inputClass}
                   />
                 </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label={`Pre-Money (${m.currency})`}>
+                    <input
+                      name="pre_money"
+                      type="number"
+                      step="any"
+                      defaultValue={m.pre_money_local ?? ""}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label={`Post-Money (${m.currency})`}>
+                    <input
+                      name="post_money"
+                      type="number"
+                      step="any"
+                      defaultValue={m.post_money_local ?? ""}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
                 <Field label="Approval Status">
                   <select name="status" defaultValue={m.approval_status} className={inputClass}>
                     <SelectOptions values={["draft", "pending", "approved"] as ApprovalStatus[]} />
@@ -614,6 +543,7 @@ function CompanyEditForm({
     legal_name: string;
     brand_name: string | null;
     abbr: string | null;
+    aliases: string[] | null;
     sector: string | null;
     hq_city: string | null;
     hq_country: string | null;
@@ -634,17 +564,16 @@ function CompanyEditForm({
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
         const websiteTrimmed = website.trim() || null;
-        const websiteChanged = websiteTrimmed !== (company.website ?? "").trim();
         let logo_url: string | null = company.logo_url;
 
         setSyncing(true);
         try {
           if (!websiteTrimmed) {
             logo_url = null;
-          } else if (websiteChanged) {
-            logo_url = isSupabaseConfigured()
-              ? await syncCompanyLogo(company.id, websiteTrimmed, previewLabel)
-              : faviconUrlFromWebsite(websiteTrimmed);
+          } else {
+            // Always re-sync so Save persists exactly what the preview showed
+            // (also self-heals any stale or corrupt stored logo).
+            logo_url = await syncCompanyLogo(company.id, websiteTrimmed, previewLabel);
           }
 
           onSave({
@@ -652,6 +581,10 @@ function CompanyEditForm({
             legal_name: String(fd.get("legal_name")),
             brand_name: String(fd.get("brand_name") || "") || null,
             abbr: String(fd.get("abbr") || "") || null,
+            aliases: String(fd.get("aliases") || "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
             sector: String(fd.get("sector") || "") || null,
             hq_city: String(fd.get("hq_city") || "") || null,
             hq_country: String(fd.get("hq_country") || "") || null,
@@ -673,6 +606,14 @@ function CompanyEditForm({
       </Field>
       <Field label="Abbreviation">
         <input name="abbr" defaultValue={company.abbr ?? ""} maxLength={4} className={inputClass} />
+      </Field>
+      <Field label="Aliases / Previous Names">
+        <input
+          name="aliases"
+          defaultValue={(company.aliases ?? []).join(", ")}
+          className={inputClass}
+          placeholder="Super Living, SLR (comma-separated)"
+        />
       </Field>
       <Field label="Sector">
         <input name="sector" defaultValue={company.sector ?? ""} className={inputClass} />
